@@ -176,14 +176,19 @@ public class MusicRecognitionOrchestrator : IDisposable
     private void HandleNoMatch()
     {
         _consecutiveMisses++;
-        if (_currentSong != null && _consecutiveMisses < MissesBeforeClearingLyrics)
+
+        // Only a song whose lyrics lookup finished may stay on the card: after a failed or aborted lookup there is
+        // nothing to restore, and showing DisplayingLyrics would claim "no lyrics found" for a song never looked up.
+        if (_currentSong != null && _lyricsResolved && _consecutiveMisses < MissesBeforeClearingLyrics)
         {
             EnsureDisplayingLyrics();
             return;
         }
 
+        // The next match refetches: it sees no current song.
         _currentSong = null;
         CurrentLyrics = null;
+        _lyricsResolved = false;
         SetState(RecognitionState.NoMatch);
     }
 

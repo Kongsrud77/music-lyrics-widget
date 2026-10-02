@@ -330,6 +330,42 @@ public class MusicRecognitionOrchestratorTests
     }
 
     [Fact]
+    public async Task MissAfterFailedLyricsFetch_EntersNoMatch_AndNeverShowsLyricsThatWereNotLookedUp()
+    {
+        _identifier.Enqueue(SongA);
+        _lyrics.EnqueueThrow(new InvalidOperationException("lyrics down"));
+        await RunCycleAsync();
+        Assert.Equal(RecognitionState.Error, _orchestrator.State);
+        _identifier.Enqueue(null);
+
+        await RunCycleAsync();
+
+        Assert.Equal(RecognitionState.NoMatch, _orchestrator.State);
+        Assert.Null(_orchestrator.CurrentSong);
+        Assert.Null(_orchestrator.CurrentLyrics);
+        Assert.DoesNotContain(RecognitionState.DisplayingLyrics, States);
+    }
+
+    [Fact]
+    public async Task SameSongAfterMissFollowingFailedLyricsFetch_RefetchesLyrics()
+    {
+        _identifier.Enqueue(SongA);
+        _lyrics.EnqueueThrow(new InvalidOperationException("lyrics down"));
+        await RunCycleAsync();
+        _identifier.Enqueue(null);
+        await RunCycleAsync();
+        _identifier.Enqueue(SongA);
+        _lyrics.Enqueue(LyricsA);
+
+        await RunCycleAsync();
+
+        Assert.Equal(RecognitionState.DisplayingLyrics, _orchestrator.State);
+        Assert.Same(LyricsA, _orchestrator.CurrentLyrics);
+        Assert.Equal(2, _lyrics.RequestedSongs.Count);
+        Assert.Single(_recognized);
+    }
+
+    [Fact]
     public async Task OverlappingCycle_ReturnsImmediately_AndDoesNotCaptureAgain()
     {
         var gate = new BlockingGate();
