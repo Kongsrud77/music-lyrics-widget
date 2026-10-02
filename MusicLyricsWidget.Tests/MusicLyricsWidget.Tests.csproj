@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>MusicLyricsWidget.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="NAudio.Core" Version="2.2.1" />
+    <PackageReference Include="NAudio.WinMM" Version="2.2.1" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <!-- Pure app sources are compiled into the test assembly (no ProjectReference to the WinUI exe),
+       so internal app members are directly visible to the tests. -->
+  <ItemGroup>
+    <Compile Include="..\MusicLyricsWidget\Models\*.cs" Link="App\Models\%(Filename)%(Extension)" />
+    <Compile Include="..\MusicLyricsWidget\Services\*.cs" Link="App\Services\%(Filename)%(Extension)" />
+    <Compile Include="..\MusicLyricsWidget\Widget\WidgetStateManager.cs" Link="App\Widget\%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <!-- WidgetStateManager reads the card templates from AppContext.BaseDirectory\Widget\WidgetTemplates. -->
+  <ItemGroup>
+    <Content Include="..\MusicLyricsWidget\Widget\WidgetTemplates\*.json"
+             Link="Widget\WidgetTemplates\%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

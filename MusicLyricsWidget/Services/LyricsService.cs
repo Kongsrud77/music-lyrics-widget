@@ -87,7 +87,7 @@ public class LyricsService
     /// Parses LRC format lyrics into timestamped lines.
     /// Example: [01:23.45] Some lyrics text
     /// </summary>
-    private static List<LyricsLine> ParseLrc(string lrcText)
+    internal static List<LyricsLine> ParseLrc(string lrcText)
     {
         var lines = new List<LyricsLine>();
         var regex = new Regex(@"\[(\d{2}):(\d{2})\.(\d{2,3})\]\s*(.*)");

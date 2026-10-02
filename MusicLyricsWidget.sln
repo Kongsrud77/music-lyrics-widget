@@ -4,6 +4,8 @@ VisualStudioVersion = 18.4.11620.152 stable
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MusicLyricsWidget", "MusicLyricsWidget\MusicLyricsWidget.csproj", "{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MusicLyricsWidget.Tests", "MusicLyricsWidget.Tests\MusicLyricsWidget.Tests.csproj", "{7C0F5A8E-3B2D-4E6A-9D41-5F8B2A6C1E93}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -15,6 +17,10 @@ Global
 		{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}.Debug|x64.Deploy.0 = Debug|x64
 		{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}.Release|x64.ActiveCfg = Release|x64
 		{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}.Release|x64.Build.0 = Release|x64
+		{7C0F5A8E-3B2D-4E6A-9D41-5F8B2A6C1E93}.Debug|x64.ActiveCfg = Debug|x64
+		{7C0F5A8E-3B2D-4E6A-9D41-5F8B2A6C1E93}.Debug|x64.Build.0 = Debug|x64
+		{7C0F5A8E-3B2D-4E6A-9D41-5F8B2A6C1E93}.Release|x64.ActiveCfg = Release|x64
+		{7C0F5A8E-3B2D-4E6A-9D41-5F8B2A6C1E93}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

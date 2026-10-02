@@ -57,12 +57,12 @@ public class SongIdentificationService
         return ParseResponse(json);
     }
 
-    private string BuildStringToSign(string timestamp)
+    internal string BuildStringToSign(string timestamp)
     {
         return $"POST\n/v1/identify\n{_accessKey}\naudio\n1\n{timestamp}";
     }
 
-    private string ComputeSignature(string stringToSign)
+    internal string ComputeSignature(string stringToSign)
     {
         var keyBytes = Encoding.UTF8.GetBytes(_accessSecret);
         var dataBytes = Encoding.UTF8.GetBytes(stringToSign);
@@ -72,7 +72,7 @@ public class SongIdentificationService
         return Convert.ToBase64String(hash);
     }
 
-    private static SongInfo? ParseResponse(string json)
+    internal static SongInfo? ParseResponse(string json)
     {
         var root = JObject.Parse(json);
         var statusCode = root["status"]?["code"]?.Value<int>();
