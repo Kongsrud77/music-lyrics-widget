@@ -69,7 +69,8 @@
                 <Definitions>
                   <Definition Id="MusicLyricsWidget"
                     DisplayName="Music Lyrics"
-                    Description="Shows lyrics for currently playing music">
+                    Description="Shows lyrics for currently playing music"
+                    AllowMultiple="false">
                     <Capabilities>
                       <Capability>
                         <Size Name="medium" />
@@ -82,6 +83,9 @@
                       <Icons>
                         <Icon Path="Assets\WidgetIcon.png" />
                       </Icons>
+                      <Screenshots>
+                        <Screenshot Path="Assets\WidgetScreenshot.png" DisplayAltText="Music Lyrics widget showing a song title, artist and lyrics" />
+                      </Screenshots>
                     </ThemeResources>
                   </Definition>
                 </Definitions>
