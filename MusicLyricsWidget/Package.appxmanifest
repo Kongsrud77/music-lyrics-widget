@@ -46,7 +46,7 @@
         <!-- Widget Provider Registration -->
         <com:Extension Category="windows.comServer">
           <com:ComServer>
-            <com:ExeServer Executable="MusicLyricsWidget.exe" DisplayName="MusicLyricsWidgetProvider">
+            <com:ExeServer Executable="MusicLyricsWidget.exe" Arguments="-RegisterProcessAsComServer" DisplayName="MusicLyricsWidgetProvider">
               <com:Class Id="3B37F72B-9C04-418C-88AE-BEB6058AE758" DisplayName="MusicLyricsWidgetProvider" />
             </com:ExeServer>
           </com:ComServer>

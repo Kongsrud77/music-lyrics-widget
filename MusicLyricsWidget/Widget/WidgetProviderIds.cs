@@ -16,4 +16,11 @@ internal static class WidgetProviderIds
     /// Verb of the <c>Action.Execute</c> buttons in every widget template.
     /// </summary>
     public const string ListenNowVerb = "listenNow";
+
+    /// <summary>
+    /// Command-line argument that makes the exe serve the widget provider instead of opening the settings window.
+    /// Must equal <c>com:ExeServer/@Arguments</c> in <c>Package.appxmanifest</c>: COM starts the exe with that
+    /// argument, and without it <c>Program.Main</c> never registers the class object.
+    /// </summary>
+    public const string ComServerArgument = "-RegisterProcessAsComServer";
 }

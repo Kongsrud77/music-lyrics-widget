@@ -7,7 +7,6 @@ namespace MusicLyricsWidget;
 
 public static class Program
 {
-    private const string RegisterProcessAsComServerArgument = "-RegisterProcessAsComServer";
     private const string ComServerThreadName = "WidgetProviderComServer";
 
     [STAThread]
@@ -15,7 +14,7 @@ public static class Program
     {
         WinRT.ComWrappersSupport.InitializeComWrappers();
 
-        if (args.Length > 0 && args.Contains(RegisterProcessAsComServerArgument))
+        if (LaunchArguments.IsComServerLaunch(args))
         {
             // Activated as widget provider via COM. Main stays STA for the WinUI path, so the
             // server runs on its own MTA thread (as Microsoft's reference provider does).

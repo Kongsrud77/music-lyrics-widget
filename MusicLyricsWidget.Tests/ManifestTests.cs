@@ -8,6 +8,7 @@ public class ManifestTests
     private const string ProjectFolderName = "MusicLyricsWidget";
     private const string ManifestFileName = "Package.appxmanifest";
     private const string ExpectedAllowMultiple = "false";
+    private const string ExpectedExecutable = "MusicLyricsWidget.exe";
     private const char ManifestPathSeparator = '\\';
 
     private readonly string _projectFolder;
@@ -28,6 +29,15 @@ public class ManifestTests
 
         Assert.Equal(WidgetProviderIds.ProviderClsid, Attribute(comClass, "Id"), ignoreCase: true);
         Assert.Equal(WidgetProviderIds.ProviderClsid, Attribute(createInstance, "ClassId"), ignoreCase: true);
+    }
+
+    [Fact]
+    public void ExeServer_LaunchesTheAppExeWithTheComServerArgument()
+    {
+        var exeServer = Assert.Single(Descendants(_manifest, "ExeServer"));
+
+        Assert.Equal(ExpectedExecutable, Attribute(exeServer, "Executable"));
+        Assert.Contains(WidgetProviderIds.ComServerArgument, Attribute(exeServer, "Arguments"));
     }
 
     [Fact]
