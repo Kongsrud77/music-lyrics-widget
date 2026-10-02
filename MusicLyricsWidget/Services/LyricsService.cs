@@ -24,6 +24,13 @@ public class LyricsService : ILyricsProvider
     private const string DurationField = "duration";
     private const int RequestTimeoutSeconds = 10;
 
+    // LRCLIB answers 503 ServerOverloaded with "Retry-After: 1" when an uncached lookup cannot get a database slot
+    // in time, and asks the client to retry. Honour that a few times before reporting a failure; a server asking
+    // for a longer pause than MaxRetryDelaySeconds is not retried (the next cycle will try again).
+    private const int MaxAttempts = 3;
+    private const int DefaultRetryDelaySeconds = 1;
+    private const int MaxRetryDelaySeconds = 5;
+
     // A duration outside a plausible song length is more likely bad data than the real value: treat it as unknown,
     // so it neither makes the exact lookup miss nor skews which search result is closest.
     private const int MinDurationSeconds = 1;
@@ -34,14 +41,20 @@ public class LyricsService : ILyricsProvider
     private static readonly HttpClient SharedHttpClient = CreateSharedHttpClient();
 
     private readonly HttpClient _httpClient;
+    private readonly Func<TimeSpan, CancellationToken, Task> _delay;
 
     public LyricsService() : this(SharedHttpClient)
     {
     }
 
-    internal LyricsService(HttpClient httpClient)
+    internal LyricsService(HttpClient httpClient) : this(httpClient, Task.Delay)
+    {
+    }
+
+    internal LyricsService(HttpClient httpClient, Func<TimeSpan, CancellationToken, Task> delay)
     {
         _httpClient = httpClient;
+        _delay = delay;
     }
 
     private static HttpClient CreateSharedHttpClient()
@@ -58,6 +71,7 @@ public class LyricsService : ILyricsProvider
     /// Returns null when LRCLIB has no usable lyrics, or without any request when the title or artist is blank
     /// (LRCLIB rejects an empty name, which would only fail again every cycle); throws when the lookup itself fails
     /// (HTTP error, timeout, unreadable response) so the caller can tell "no lyrics" from "could not look up".
+    /// A busy server (503/429) is retried after its Retry-After pause before that counts as a failure.
     /// </summary>
     public async Task<LyricsResult?> GetLyricsAsync(SongInfo song, CancellationToken cancellationToken = default)
     {
@@ -87,7 +101,7 @@ public class LyricsService : ILyricsProvider
             url += $"&{DurationParam}={wholeSeconds.ToString(CultureInfo.InvariantCulture)}";
         }
 
-        using var response = await _httpClient.GetAsync(url, cancellationToken);
+        using var response = await GetWithRetryAsync(url, cancellationToken);
 
         // LRCLIB answers 404 TrackNotFound when nothing matches: that is "no exact match", not a failure.
         if (response.StatusCode == HttpStatusCode.NotFound)
@@ -102,12 +116,49 @@ public class LyricsService : ILyricsProvider
     {
         var url = $"{BaseUrl}{SearchPath}?{BuildTrackQuery(song)}";
 
-        using var response = await _httpClient.GetAsync(url, cancellationToken);
+        using var response = await GetWithRetryAsync(url, cancellationToken);
         response.EnsureSuccessStatusCode();
 
         var json = await response.Content.ReadAsStringAsync(cancellationToken);
         var best = SelectBestMatch(JArray.Parse(json), duration);
         return best == null ? null : ToLyricsResult(best);
+    }
+
+    /// <summary>
+    /// GETs <paramref name="url"/>, retrying a busy answer (503/429) after the server's Retry-After pause, up to
+    /// <see cref="MaxAttempts"/> attempts. Returns the last response; the caller decides what its status means.
+    /// </summary>
+    private async Task<HttpResponseMessage> GetWithRetryAsync(string url, CancellationToken cancellationToken)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            var response = await _httpClient.GetAsync(url, cancellationToken);
+            if (attempt == MaxAttempts || !IsBusy(response.StatusCode))
+                return response;
+
+            var pause = RetryPause(response);
+            if (pause == null)
+                return response;
+
+            response.Dispose();
+            await _delay(pause.Value, cancellationToken);
+        }
+    }
+
+    private static bool IsBusy(HttpStatusCode status) =>
+        status is HttpStatusCode.ServiceUnavailable or HttpStatusCode.TooManyRequests;
+
+    /// <summary>The pause the server asks for (1 s if it names none), or null when it is longer than we wait.</summary>
+    private static TimeSpan? RetryPause(HttpResponseMessage response)
+    {
+        var retryAfter = response.Headers.RetryAfter;
+        var pause = retryAfter?.Delta
+            ?? (retryAfter?.Date is { } date ? date - DateTimeOffset.UtcNow : TimeSpan.FromSeconds(DefaultRetryDelaySeconds));
+
+        if (pause < TimeSpan.Zero)
+            return TimeSpan.Zero;
+
+        return pause > TimeSpan.FromSeconds(MaxRetryDelaySeconds) ? null : pause;
     }
 
     private static string BuildTrackQuery(SongInfo song) =>

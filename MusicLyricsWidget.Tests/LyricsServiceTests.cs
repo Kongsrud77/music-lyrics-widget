@@ -41,7 +41,9 @@ public class LyricsServiceTests
             _ => throw new InvalidOperationException($"Unexpected request: {request.Uri}"),
         });
 
-    private static LyricsService CreateService(StubHttpMessageHandler handler) => new(new HttpClient(handler));
+    // Retries on 503/429 must not slow the suite down: the delay is skipped (LyricsServiceRetryTests covers it).
+    private static LyricsService CreateService(StubHttpMessageHandler handler) =>
+        new(new HttpClient(handler), (_, _) => Task.CompletedTask);
 
     private static IEnumerable<RecordedRequest> Calls(StubHttpMessageHandler handler, string path) =>
         handler.Requests.Where(r => r.Uri!.AbsolutePath == path);

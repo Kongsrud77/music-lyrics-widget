@@ -26,16 +26,22 @@ internal sealed record RecordedRequest(
 
 /// <summary>
 /// An <see cref="HttpMessageHandler"/> that never touches the network: a delegate maps each recorded request to a
-/// (status, body) pair, and every request received is kept in <see cref="Requests"/>.
+/// response, and every request received is kept in <see cref="Requests"/>.
 /// </summary>
 internal sealed class StubHttpMessageHandler : HttpMessageHandler
 {
-    private readonly Func<RecordedRequest, (HttpStatusCode Status, string Body)> _respond;
+    private readonly Func<RecordedRequest, HttpResponseMessage> _respond;
     private readonly List<RecordedRequest> _requests = new();
 
-    public StubHttpMessageHandler(Func<RecordedRequest, (HttpStatusCode Status, string Body)> respond)
+    /// <summary>Full control over the response, e.g. to set headers such as Retry-After.</summary>
+    public StubHttpMessageHandler(Func<RecordedRequest, HttpResponseMessage> respond)
     {
         _respond = respond;
+    }
+
+    public StubHttpMessageHandler(Func<RecordedRequest, (HttpStatusCode Status, string Body)> respond)
+        : this(request => Response(respond(request)))
+    {
     }
 
     /// <summary>Answers every request with the same status and body.</summary>
@@ -55,9 +61,12 @@ internal sealed class StubHttpMessageHandler : HttpMessageHandler
         var recorded = await RecordAsync(request, cancellationToken);
         _requests.Add(recorded);
 
-        var (status, body) = _respond(recorded);
-        return new HttpResponseMessage(status) { Content = new StringContent(body, Encoding.UTF8) };
+        return _respond(recorded);
     }
+
+    /// <summary>A response with this status and a UTF-8 text body.</summary>
+    public static HttpResponseMessage Response((HttpStatusCode Status, string Body) answer) =>
+        new(answer.Status) { Content = new StringContent(answer.Body, Encoding.UTF8) };
 
     private static async Task<RecordedRequest> RecordAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
