@@ -48,11 +48,14 @@ public static class Program
         var providerClsid = Guid.Parse(WidgetProviderIds.ProviderClsid);
 
         // One provider per process: a Widget Host restart calls CreateInstance again, and a second provider would
-        // run its own orchestrator (and microphone loop) next to the first. ExecutionAndPublication runs the factory
-        // once even when CreateInstance is called concurrently (and caches a factory exception for later calls).
+        // run its own orchestrator (and microphone loop) next to the first. PublicationOnly hands every caller the
+        // same published instance but does not cache a factory exception: the constructor makes a cross-process COM
+        // call (GetWidgetInfos) that can fail transiently, and a cached failure would make every later CreateInstance
+        // fail, so no provider would ever exist to signal noWidgetsLeft. The constructor has no side effects, so a
+        // duplicate built by a racing caller and discarded is harmless.
         var provider = new Lazy<LyricsWidgetProvider>(
             () => new LyricsWidgetProvider(onLastWidgetDeleted: () => noWidgetsLeft.Set()),
-            LazyThreadSafetyMode.ExecutionAndPublication);
+            LazyThreadSafetyMode.PublicationOnly);
 
         using var server = new ComServer(providerClsid, () => provider.Value);
 
