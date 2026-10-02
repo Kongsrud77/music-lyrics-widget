@@ -24,8 +24,8 @@ public class LyricsService : ILyricsProvider
     private const string DurationField = "duration";
     private const int RequestTimeoutSeconds = 10;
 
-    // A duration outside a plausible song length is more likely bad data than the real value: leave it out of the
-    // query rather than let it make the exact lookup miss.
+    // A duration outside a plausible song length is more likely bad data than the real value: treat it as unknown,
+    // so it neither makes the exact lookup miss nor skews which search result is closest.
     private const int MinDurationSeconds = 1;
     private const int MaxDurationSeconds = 3600;
 
@@ -55,28 +55,37 @@ public class LyricsService : ILyricsProvider
     /// Fetches lyrics from LRCLIB. First asks for the exact track (title, artist, album and duration), because
     /// a search often returns many versions with different timings; if LRCLIB has no exact match (or the match
     /// has no lyrics) it searches by title and artist and picks the version whose duration is closest.
-    /// Returns null when LRCLIB has no usable lyrics; throws when the lookup itself fails (HTTP error, timeout,
-    /// unreadable response) so the caller can tell "no lyrics" from "could not look up".
+    /// Returns null when LRCLIB has no usable lyrics, or without any request when the title or artist is blank
+    /// (LRCLIB rejects an empty name, which would only fail again every cycle); throws when the lookup itself fails
+    /// (HTTP error, timeout, unreadable response) so the caller can tell "no lyrics" from "could not look up".
     /// </summary>
     public async Task<LyricsResult?> GetLyricsAsync(SongInfo song, CancellationToken cancellationToken = default)
     {
-        var exact = await GetExactMatchAsync(song, cancellationToken);
+        if (string.IsNullOrWhiteSpace(song.Title) || string.IsNullOrWhiteSpace(song.Artist))
+            return null;
+
+        // One plausibility decision for both lookups: a bogus duration is neither sent nor used as the ranking target.
+        var duration = ToPlausibleDuration(song.Duration);
+
+        var exact = await GetExactMatchAsync(song, duration, cancellationToken);
         if (exact != null)
             return exact;
 
-        return await SearchAsync(song, cancellationToken);
+        return await SearchAsync(song, duration, cancellationToken);
     }
 
-    private async Task<LyricsResult?> GetExactMatchAsync(SongInfo song, CancellationToken cancellationToken)
+    private async Task<LyricsResult?> GetExactMatchAsync(SongInfo song, TimeSpan? duration, CancellationToken cancellationToken)
     {
         var url = $"{BaseUrl}{GetPath}?{BuildTrackQuery(song)}";
 
         if (!string.IsNullOrWhiteSpace(song.Album))
             url += $"&{AlbumNameParam}={Uri.EscapeDataString(song.Album)}";
 
-        var durationSeconds = ToQueryDurationSeconds(song.Duration);
-        if (durationSeconds != null)
-            url += $"&{DurationParam}={durationSeconds.Value.ToString(CultureInfo.InvariantCulture)}";
+        if (duration != null)
+        {
+            var wholeSeconds = (int)Math.Round(duration.Value.TotalSeconds);
+            url += $"&{DurationParam}={wholeSeconds.ToString(CultureInfo.InvariantCulture)}";
+        }
 
         using var response = await _httpClient.GetAsync(url, cancellationToken);
 
@@ -89,7 +98,7 @@ public class LyricsService : ILyricsProvider
         return ToLyricsResult(JObject.Parse(json));
     }
 
-    private async Task<LyricsResult?> SearchAsync(SongInfo song, CancellationToken cancellationToken)
+    private async Task<LyricsResult?> SearchAsync(SongInfo song, TimeSpan? duration, CancellationToken cancellationToken)
     {
         var url = $"{BaseUrl}{SearchPath}?{BuildTrackQuery(song)}";
 
@@ -97,15 +106,15 @@ public class LyricsService : ILyricsProvider
         response.EnsureSuccessStatusCode();
 
         var json = await response.Content.ReadAsStringAsync(cancellationToken);
-        var best = SelectBestMatch(JArray.Parse(json), song.Duration);
+        var best = SelectBestMatch(JArray.Parse(json), duration);
         return best == null ? null : ToLyricsResult(best);
     }
 
     private static string BuildTrackQuery(SongInfo song) =>
         $"{TrackNameParam}={Uri.EscapeDataString(song.Title)}&{ArtistNameParam}={Uri.EscapeDataString(song.Artist)}";
 
-    /// <summary>Whole seconds for the /get query, or null when the duration is unknown or implausible.</summary>
-    private static int? ToQueryDurationSeconds(TimeSpan? duration)
+    /// <summary>The duration as given, or null when it is unknown or implausible (judged on whole seconds).</summary>
+    private static TimeSpan? ToPlausibleDuration(TimeSpan? duration)
     {
         if (duration == null)
             return null;
@@ -114,7 +123,7 @@ public class LyricsService : ILyricsProvider
         if (seconds < MinDurationSeconds || seconds > MaxDurationSeconds)
             return null;
 
-        return (int)seconds;
+        return duration;
     }
 
     /// <summary>

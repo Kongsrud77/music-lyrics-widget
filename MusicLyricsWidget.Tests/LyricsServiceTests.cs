@@ -187,6 +187,54 @@ public class LyricsServiceTests
         Assert.Equal("right one", result.PlainLyrics);
     }
 
+    [Theory]
+    [InlineData(0.0)]
+    [InlineData(0.4)]
+    [InlineData(3600.6)]
+    [InlineData(7200.0)]
+    public async Task GetLyricsAsync_ImplausibleDuration_IsNotUsedToRankSearchResults(double seconds)
+    {
+        // The first synced entry is neither the shortest nor the longest, so a bogus target at either extreme picks another one.
+        var searchBody = LrclibJson.SearchBody(
+            LrclibJson.Track(200, "[00:01.00] first synced", null),
+            LrclibJson.Track(120, "[00:01.00] shortest", null),
+            LrclibJson.Track(300, "[00:01.00] longest", null));
+        var handler = Lrclib(HttpStatusCode.NotFound, TrackNotFoundJson, searchBody: searchBody);
+
+        var result = await CreateService(handler).GetLyricsAsync(Song(seconds));
+
+        Assert.NotNull(result);
+        Assert.Equal("first synced", result.PlainLyrics);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task GetLyricsAsync_BlankTitle_ReturnsNullWithoutAnyRequest(string title)
+    {
+        var handler = Lrclib(HttpStatusCode.OK, SyncedTrackJson);
+        var song = new SongInfo { Title = title, Artist = "Artist One" };
+
+        var result = await CreateService(handler).GetLyricsAsync(song);
+
+        Assert.Null(result);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task GetLyricsAsync_BlankArtist_ReturnsNullWithoutAnyRequest(string artist)
+    {
+        var handler = Lrclib(HttpStatusCode.OK, SyncedTrackJson);
+        var song = new SongInfo { Title = "Test Title", Artist = artist };
+
+        var result = await CreateService(handler).GetLyricsAsync(song);
+
+        Assert.Null(result);
+        Assert.Empty(handler.Requests);
+    }
+
     [Fact]
     public async Task GetLyricsAsync_ExactMatchWithoutLyrics_FallsThroughToSearch()
     {
