@@ -23,6 +23,7 @@ public class WidgetStateManagerTests
         ["Idle"] = new(RecognitionState.Idle, null, null, null),
         ["Listening"] = new(RecognitionState.Listening, null, null, null),
         ["Identifying"] = new(RecognitionState.Identifying, null, null, null),
+        ["NoMatch"] = new(RecognitionState.NoMatch, null, null, null),
         ["FetchingLyrics"] = new(RecognitionState.FetchingLyrics, TestSong, null, null),
         ["DisplayingLyrics with lyrics"] = new(RecognitionState.DisplayingLyrics, TestSong, TestLyrics, null),
         ["DisplayingLyrics without lyrics"] = new(RecognitionState.DisplayingLyrics, TestSong, null, null),
@@ -68,6 +69,15 @@ public class WidgetStateManagerTests
 
         Assert.Equal(ReadTemplate(ListeningTemplateFile), template);
         AssertData(data, ("statusText", "Identifying song..."));
+    }
+
+    [Fact]
+    public void NoMatch_ReturnsListeningTemplateWithNoMatchText()
+    {
+        var (template, data) = GetContent(Cases["NoMatch"]);
+
+        Assert.Equal(ReadTemplate(ListeningTemplateFile), template);
+        AssertData(data, ("statusText", "No music recognised yet — listening again shortly..."));
     }
 
     [Fact]

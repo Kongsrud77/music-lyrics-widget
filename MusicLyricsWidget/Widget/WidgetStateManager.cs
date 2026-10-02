@@ -35,6 +35,10 @@ public class WidgetStateManager
                 _listeningTemplate,
                 CreateData(new { statusText = "Identifying song..." })),
 
+            RecognitionState.NoMatch => (
+                _listeningTemplate,
+                CreateData(new { statusText = "No music recognised yet — listening again shortly..." })),
+
             RecognitionState.FetchingLyrics => (
                 _listeningTemplate,
                 CreateData(new { statusText = $"Found: {song} — fetching lyrics..." })),
