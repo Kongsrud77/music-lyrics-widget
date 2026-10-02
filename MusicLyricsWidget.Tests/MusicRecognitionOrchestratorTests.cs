@@ -218,6 +218,82 @@ public class MusicRecognitionOrchestratorTests
     }
 
     [Fact]
+    public async Task IdentifierTimesOut_WithTokenNotCancelled_EndsInError_AndRaisesErrorOccurredOnce()
+    {
+        var timeout = new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout.");
+        _identifier.EnqueueThrow(timeout);
+
+        await RunCycleAsync();
+
+        Assert.Equal(
+            new[] { RecognitionState.Listening, RecognitionState.Identifying, RecognitionState.Error },
+            States);
+        Assert.Equal(timeout.Message, _orchestrator.ErrorMessage);
+        Assert.Equal(new[] { timeout.Message }, _errors);
+    }
+
+    [Fact]
+    public async Task LyricsProviderTimesOut_WithTokenNotCancelled_EndsInError_AndRaisesErrorOccurredOnce()
+    {
+        var timeout = new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout.");
+        _identifier.Enqueue(SongA);
+        _lyrics.EnqueueThrow(timeout);
+
+        await RunCycleAsync();
+
+        Assert.Equal(RecognitionState.Error, _orchestrator.State);
+        Assert.Equal(timeout.Message, _orchestrator.ErrorMessage);
+        Assert.Equal(new[] { timeout.Message }, _errors);
+        Assert.Empty(_recognized);
+    }
+
+    [Fact]
+    public async Task SameSongAfterFailedLyricsFetch_RefetchesLyrics()
+    {
+        _identifier.Enqueue(SongA);
+        _lyrics.EnqueueThrow(new InvalidOperationException("lyrics down"));
+        await RunCycleAsync();
+        Assert.Equal(RecognitionState.Error, _orchestrator.State);
+        _emitted.Clear();
+        _identifier.Enqueue(SongA);
+        _lyrics.Enqueue(LyricsA);
+
+        await RunCycleAsync();
+
+        Assert.Equal(FullCycle, States);
+        Assert.Equal(RecognitionState.DisplayingLyrics, _orchestrator.State);
+        Assert.Same(LyricsA, _orchestrator.CurrentLyrics);
+        Assert.Equal(2, _lyrics.RequestedSongs.Count);
+        var recognized = Assert.Single(_recognized);
+        Assert.Same(LyricsA, recognized.Lyrics);
+    }
+
+    [Fact]
+    public async Task SameSongAfterAbortedLyricsFetch_RefetchesLyrics()
+    {
+        var gate = new BlockingGate();
+        _lyrics.Gate = gate;
+        _identifier.Enqueue(SongA);
+        _lyrics.Enqueue(LyricsA);
+        using var cts = new CancellationTokenSource();
+        var aborted = _orchestrator.RecognizeOnceAsync(cts.Token);
+        await gate.Entered.WaitAsync(GuardTimeout);
+        cts.Cancel();
+        gate.Release();
+        await aborted.WaitAsync(GuardTimeout);
+        Assert.Empty(_recognized);
+        _identifier.Enqueue(SongA);
+        _lyrics.Enqueue(LyricsB);
+
+        await RunCycleAsync();
+
+        Assert.Equal(RecognitionState.DisplayingLyrics, _orchestrator.State);
+        Assert.Same(LyricsB, _orchestrator.CurrentLyrics);
+        Assert.Equal(2, _lyrics.RequestedSongs.Count);
+        Assert.Single(_recognized);
+    }
+
+    [Fact]
     public async Task SameSongAfterError_RestoresDisplayingLyrics_WithoutRefetching()
     {
         await ShowSongAAsync();

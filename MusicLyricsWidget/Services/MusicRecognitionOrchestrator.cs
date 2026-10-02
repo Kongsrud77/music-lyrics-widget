@@ -33,6 +33,7 @@ public class MusicRecognitionOrchestrator : IDisposable
     private Timer? _pollTimer;
     private SongInfo? _currentSong;
     private int _consecutiveMisses;
+    private bool _lyricsResolved;
     private int _cycleState = CycleIdle;
 
     public RecognitionState State { get; private set; } = RecognitionState.Idle;
@@ -83,6 +84,7 @@ public class MusicRecognitionOrchestrator : IDisposable
         _currentSong = null;
         CurrentLyrics = null;
         _consecutiveMisses = 0;
+        _lyricsResolved = false;
         SetState(RecognitionState.Idle);
     }
 
@@ -121,9 +123,10 @@ public class MusicRecognitionOrchestrator : IDisposable
             else
                 await HandleMatchAsync(song, cancellationToken);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            // Expected on stop
+            // Expected on stop. A cancellation the token did not ask for (e.g. an HttpClient timeout) is a real
+            // failure and falls through to the Error handling below.
         }
         catch (Exception ex)
         {
@@ -145,8 +148,9 @@ public class MusicRecognitionOrchestrator : IDisposable
     {
         _consecutiveMisses = 0;
 
-        // Same song still playing: no refetch (even if none were found), and no redraw unless an error moved the state.
-        if (song.Equals(_currentSong))
+        // Same song still playing and its lookup finished (even if it found nothing): no refetch, and no redraw
+        // unless an error moved the state. A lookup that failed or was aborted is retried on the next match.
+        if (song.Equals(_currentSong) && _lyricsResolved)
         {
             EnsureDisplayingLyrics();
             return;
@@ -155,10 +159,12 @@ public class MusicRecognitionOrchestrator : IDisposable
         // Step 3: Fetch lyrics
         _currentSong = song;
         CurrentLyrics = null;
+        _lyricsResolved = false;
         SetState(RecognitionState.FetchingLyrics);
         var lyrics = await _lyrics.GetLyricsAsync(song, cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
 
+        _lyricsResolved = true;
         CurrentLyrics = lyrics;
         SetState(RecognitionState.DisplayingLyrics);
         if (lyrics != null)
