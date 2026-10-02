@@ -14,9 +14,9 @@ public enum RecognitionState
 
 public class MusicRecognitionOrchestrator : IDisposable
 {
-    private readonly AudioCaptureService _audioCapture;
-    private readonly SongIdentificationService _songId;
-    private readonly LyricsService _lyrics;
+    private readonly IAudioCapture _audioCapture;
+    private readonly ISongIdentifier _songId;
+    private readonly ILyricsProvider _lyrics;
     private CancellationTokenSource? _cts;
     private Timer? _pollTimer;
     private SongInfo? _currentSong;
@@ -31,9 +31,9 @@ public class MusicRecognitionOrchestrator : IDisposable
     public event Action<string>? ErrorOccurred;
 
     public MusicRecognitionOrchestrator(
-        AudioCaptureService audioCapture,
-        SongIdentificationService songId,
-        LyricsService lyrics)
+        IAudioCapture audioCapture,
+        ISongIdentifier songId,
+        ILyricsProvider lyrics)
     {
         _audioCapture = audioCapture;
         _songId = songId;

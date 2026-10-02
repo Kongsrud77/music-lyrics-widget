@@ -5,7 +5,7 @@ using Newtonsoft.Json.Linq;
 
 namespace MusicLyricsWidget.Services;
 
-public class LyricsService
+public class LyricsService : ILyricsProvider
 {
     private readonly HttpClient _httpClient;
 

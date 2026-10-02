@@ -6,7 +6,7 @@ using Newtonsoft.Json.Linq;
 
 namespace MusicLyricsWidget.Services;
 
-public class SongIdentificationService
+public class SongIdentificationService : ISongIdentifier
 {
     private readonly HttpClient _httpClient;
     private readonly string _host;

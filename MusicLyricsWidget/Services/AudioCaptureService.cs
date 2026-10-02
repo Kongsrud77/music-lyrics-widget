@@ -2,84 +2,156 @@ using NAudio.Wave;
 
 namespace MusicLyricsWidget.Services;
 
-public class AudioCaptureService : IDisposable
+public class AudioCaptureService : IAudioCapture
 {
-    private WaveInEvent? _waveIn;
-    private MemoryStream? _buffer;
+    private const int BufferMilliseconds = 500;
+    private const int BitsPerSample = 16;
+    private const int BytesPerSample = BitsPerSample / 8;
+    private const int CaptureIdle = 0;
+    private const int CaptureActive = 1;
+    private const string NoMicrophoneMessage = "No microphone found. Please connect a microphone.";
+    private const string CaptureInProgressMessage = "An audio capture is already in progress.";
+
     private readonly int _sampleRate;
     private readonly int _channels;
     private readonly int _recordSeconds;
-    private TaskCompletionSource<byte[]>? _captureCompletion;
-    private int _bytesRecorded;
-    private int _targetBytes;
+    private readonly Func<WaveFormat, IWaveIn> _waveInFactory;
+    private readonly Func<int> _deviceCount;
+    private int _captureState = CaptureIdle;
 
     public AudioCaptureService(int sampleRate = 44100, int channels = 1, int recordSeconds = 10)
+        : this(
+            sampleRate,
+            channels,
+            recordSeconds,
+            format => new WaveInEvent { WaveFormat = format, BufferMilliseconds = BufferMilliseconds },
+            () => WaveInEvent.DeviceCount)
+    {
+    }
+
+    /// <summary>
+    /// Test seam: lets tests supply a fake wave-in and device count instead of the real microphone.
+    /// </summary>
+    internal AudioCaptureService(
+        int sampleRate,
+        int channels,
+        int recordSeconds,
+        Func<WaveFormat, IWaveIn> waveInFactory,
+        Func<int> deviceCount)
     {
         _sampleRate = sampleRate;
         _channels = channels;
         _recordSeconds = recordSeconds;
+        _waveInFactory = waveInFactory;
+        _deviceCount = deviceCount;
     }
 
     /// <summary>
     /// Records audio from the default microphone for the configured duration.
-    /// Returns raw PCM audio data.
+    /// Returns raw PCM audio data. Only one capture can run at a time; the microphone is released after every capture.
     /// </summary>
     public async Task<byte[]> CaptureAudioAsync(CancellationToken cancellationToken = default)
     {
-        if (WaveInEvent.DeviceCount == 0)
-            throw new InvalidOperationException("No microphone found. Please connect a microphone.");
+        if (Interlocked.CompareExchange(ref _captureState, CaptureActive, CaptureIdle) != CaptureIdle)
+            throw new InvalidOperationException(CaptureInProgressMessage);
 
-        _captureCompletion = new TaskCompletionSource<byte[]>();
-        _buffer = new MemoryStream();
-        _bytesRecorded = 0;
-        _targetBytes = _sampleRate * _channels * 2 * _recordSeconds; // 16-bit = 2 bytes per sample
-
-        _waveIn = new WaveInEvent
+        try
         {
-            WaveFormat = new WaveFormat(_sampleRate, 16, _channels),
-            BufferMilliseconds = 500
-        };
-
-        _waveIn.DataAvailable += OnDataAvailable;
-        _waveIn.RecordingStopped += OnRecordingStopped;
-
-        using var registration = cancellationToken.Register(() =>
-        {
-            _waveIn?.StopRecording();
-            _captureCompletion?.TrySetCanceled();
-        });
-
-        _waveIn.StartRecording();
-
-        return await _captureCompletion.Task;
-    }
-
-    private void OnDataAvailable(object? sender, WaveInEventArgs e)
-    {
-        if (_buffer == null) return;
-
-        var bytesToWrite = Math.Min(e.BytesRecorded, _targetBytes - _bytesRecorded);
-        if (bytesToWrite > 0)
-        {
-            _buffer.Write(e.Buffer, 0, bytesToWrite);
-            _bytesRecorded += bytesToWrite;
+            return await RecordAsync(cancellationToken).ConfigureAwait(false);
         }
-
-        if (_bytesRecorded >= _targetBytes)
+        finally
         {
-            _waveIn?.StopRecording();
+            Interlocked.Exchange(ref _captureState, CaptureIdle);
         }
     }
 
-    private void OnRecordingStopped(object? sender, StoppedEventArgs e)
+    private async Task<byte[]> RecordAsync(CancellationToken cancellationToken)
     {
-        if (e.Exception != null)
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (_deviceCount() == 0)
+            throw new InvalidOperationException(NoMicrophoneMessage);
+
+        var targetBytes = _sampleRate * _channels * BytesPerSample * _recordSeconds;
+        var completion = new TaskCompletionSource<byte[]>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var waveIn = _waveInFactory(new WaveFormat(_sampleRate, BitsPerSample, _channels));
+        var buffer = new MemoryStream(targetBytes);
+
+        // Handlers run on the device's thread (or synchronously inside StopRecording) and can still fire after the
+        // capture is over. Everything they touch, StopRecording included, happens under the gate while !finished;
+        // the finally block flips 'finished' under the same gate before it disposes anything.
+        var gate = new object();
+        var recordedBytes = 0;
+        var stopRequested = false;
+        var finished = false;
+
+        void OnDataAvailable(object? sender, WaveInEventArgs e)
         {
-            _captureCompletion?.TrySetException(e.Exception);
+            lock (gate)
+            {
+                if (finished) return;
+
+                var bytesToWrite = Math.Min(e.BytesRecorded, targetBytes - recordedBytes);
+                if (bytesToWrite > 0)
+                {
+                    buffer.Write(e.Buffer, 0, bytesToWrite);
+                    recordedBytes += bytesToWrite;
+                }
+
+                if (recordedBytes >= targetBytes && !stopRequested)
+                {
+                    stopRequested = true;
+                    waveIn.StopRecording();
+                }
+            }
         }
-        else if (_buffer != null)
+
+        void OnRecordingStopped(object? sender, StoppedEventArgs e)
         {
-            _captureCompletion?.TrySetResult(_buffer.ToArray());
+            lock (gate)
+            {
+                if (finished) return;
+
+                if (e.Exception != null)
+                    completion.TrySetException(e.Exception);
+                else
+                    completion.TrySetResult(buffer.ToArray());
+            }
+        }
+
+        waveIn.DataAvailable += OnDataAvailable;
+        waveIn.RecordingStopped += OnRecordingStopped;
+        try
+        {
+            waveIn.StartRecording();
+
+            using var registration = cancellationToken.Register(() => completion.TrySetCanceled(cancellationToken));
+            return await completion.Task.ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // The task is already cancelled at this point, so a RecordingStopped raised synchronously by
+            // StopRecording cannot complete it with the partial buffer.
+            waveIn.StopRecording();
+            throw;
+        }
+        finally
+        {
+            waveIn.DataAvailable -= OnDataAvailable;
+            waveIn.RecordingStopped -= OnRecordingStopped;
+            lock (gate)
+            {
+                finished = true;
+            }
+
+            try
+            {
+                waveIn.Dispose();
+            }
+            finally
+            {
+                buffer.Dispose();
+            }
         }
     }
 
@@ -117,9 +189,10 @@ public class AudioCaptureService : IDisposable
         return ms.ToArray();
     }
 
+    /// <summary>
+    /// Nothing to release here: every capture disposes its own wave-in and buffer when it ends.
+    /// </summary>
     public void Dispose()
     {
-        _waveIn?.Dispose();
-        _buffer?.Dispose();
     }
 }
