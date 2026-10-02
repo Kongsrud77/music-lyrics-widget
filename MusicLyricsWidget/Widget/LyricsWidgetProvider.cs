@@ -9,6 +9,9 @@ namespace MusicLyricsWidget.Widget;
 /// </summary>
 public class LyricsWidgetProvider : IWidgetProvider
 {
+    // Seconds between recognition cycles while the widget is listening.
+    private const int PollIntervalSeconds = 30;
+
     private readonly WidgetStateManager _stateManager = new();
     private readonly Action _onLastWidgetDeleted;
 
@@ -138,7 +141,7 @@ public class LyricsWidgetProvider : IWidgetProvider
         // Only set when a concurrent StartListening installed its orchestrator in the meantime.
         StopAndDispose(replaced);
 
-        orchestrator.Start(intervalSeconds: 30);
+        orchestrator.Start(PollIntervalSeconds);
 
         // A DeleteWidget or newer StartListening between the install and Start() detached this orchestrator and
         // stopped it before the loop began; stop it again so the microphone loop cannot outlive its widget.
