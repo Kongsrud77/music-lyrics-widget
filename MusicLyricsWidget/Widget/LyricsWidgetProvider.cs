@@ -3,10 +3,18 @@ using MusicLyricsWidget.Services;
 
 namespace MusicLyricsWidget.Widget;
 
+/// <summary>
+/// Widget provider called by the Widget Host on arbitrary RPC threads, while the orchestrator raises its events
+/// from timer and thread-pool threads. All shared state is therefore guarded by <see cref="_gate"/>.
+/// </summary>
 public class LyricsWidgetProvider : IWidgetProvider
 {
     private readonly WidgetStateManager _stateManager = new();
     private readonly Action _onLastWidgetDeleted;
+
+    // Guards _activeWidgetId and _orchestrator. Never held across WidgetManager (a cross-process COM call) or an
+    // orchestrator Start/Stop/Dispose (they raise StateChanged synchronously, which would re-enter the provider).
+    private readonly object _gate = new();
     private MusicRecognitionOrchestrator? _orchestrator;
     private string? _activeWidgetId;
 
@@ -27,23 +35,41 @@ public class LyricsWidgetProvider : IWidgetProvider
 
     public void CreateWidget(WidgetContext widgetContext)
     {
-        _activeWidgetId = widgetContext.Id;
-        UpdateWidget(RecognitionState.Idle);
+        var widgetId = widgetContext.Id;
+        lock (_gate)
+        {
+            _activeWidgetId = widgetId;
+        }
+
+        PushState(widgetId, RecognitionState.Idle, source: null);
     }
 
     public void DeleteWidget(string widgetId, string customState)
     {
-        if (_activeWidgetId == widgetId)
+        // Detach first: the Idle event of the old orchestrator is then ignored as stale instead of being pushed
+        // to the widget that is being deleted.
+        MusicRecognitionOrchestrator? stale = null;
+        lock (_gate)
         {
-            _orchestrator?.Stop();
-            _orchestrator?.Dispose();
-            _orchestrator = null;
-            _activeWidgetId = null;
+            if (_activeWidgetId == widgetId)
+            {
+                stale = _orchestrator;
+                _orchestrator = null;
+                _activeWidgetId = null;
+            }
         }
 
-        if (_activeWidgetId == null)
+        try
         {
-            _onLastWidgetDeleted();
+            StopAndDispose(stale);
+        }
+        finally
+        {
+            // Also for an untracked id, and even when Stop/Dispose throws: the process must not stay alive.
+            if (GetActiveWidgetId() == null)
+            {
+                _onLastWidgetDeleted();
+            }
         }
     }
 
@@ -62,22 +88,26 @@ public class LyricsWidgetProvider : IWidgetProvider
 
     public void Activate(WidgetContext widgetContext)
     {
-        _activeWidgetId = widgetContext.Id;
-        UpdateWidget(_orchestrator?.State ?? RecognitionState.Idle);
+        var widgetId = widgetContext.Id;
+        MusicRecognitionOrchestrator? orchestrator;
+        lock (_gate)
+        {
+            _activeWidgetId = widgetId;
+            orchestrator = _orchestrator;
+        }
+
+        PushState(widgetId, orchestrator?.State ?? RecognitionState.Idle, orchestrator);
     }
 
     public void Deactivate(string widgetId)
     {
-        _orchestrator?.Stop();
+        GetOrchestrator()?.Stop();
     }
 
     private void StartListening()
     {
-        if (_orchestrator != null)
-        {
-            _orchestrator.Stop();
-            _orchestrator.Dispose();
-        }
+        // A new listen always replaces the running one, also when the keys turn out to be missing.
+        StopAndDispose(DetachOrchestrator());
 
         var settings = SettingsManager.Load();
         if (string.IsNullOrEmpty(settings.AcrCloudHost) ||
@@ -95,41 +125,111 @@ public class LyricsWidgetProvider : IWidgetProvider
             settings.AcrCloudAccessSecret);
         var lyrics = new LyricsService();
 
-        _orchestrator = new MusicRecognitionOrchestrator(audioCapture, songId, lyrics);
-        _orchestrator.StateChanged += state => UpdateWidget(state);
-        _orchestrator.ErrorOccurred += msg => UpdateWidgetError(msg);
+        var orchestrator = new MusicRecognitionOrchestrator(audioCapture, songId, lyrics);
+        orchestrator.StateChanged += state => OnStateChanged(orchestrator, state);
 
-        _orchestrator.Start(intervalSeconds: 30);
+        MusicRecognitionOrchestrator? replaced;
+        lock (_gate)
+        {
+            replaced = _orchestrator;
+            _orchestrator = orchestrator;
+        }
+
+        // Only set when a concurrent StartListening installed its orchestrator in the meantime.
+        StopAndDispose(replaced);
+
+        orchestrator.Start(intervalSeconds: 30);
+
+        // A DeleteWidget or newer StartListening between the install and Start() detached this orchestrator and
+        // stopped it before the loop began; stop it again so the microphone loop cannot outlive its widget.
+        if (!ReferenceEquals(orchestrator, GetOrchestrator()))
+        {
+            StopAndDispose(orchestrator);
+        }
     }
 
-    private void UpdateWidget(RecognitionState state)
+    private void OnStateChanged(MusicRecognitionOrchestrator source, RecognitionState state)
     {
-        if (_activeWidgetId == null) return;
+        string? widgetId;
+        lock (_gate)
+        {
+            if (!ReferenceEquals(source, _orchestrator)) return;
+            widgetId = _activeWidgetId;
+        }
 
+        if (widgetId != null)
+        {
+            PushState(widgetId, state, source);
+        }
+    }
+
+    /// <summary>
+    /// Renders <paramref name="state"/> with the song, lyrics and error of <paramref name="source"/>, the
+    /// orchestrator that raised it. An error is rendered here only: there is no separate error event handler.
+    /// </summary>
+    private void PushState(string widgetId, RecognitionState state, MusicRecognitionOrchestrator? source)
+    {
         var (template, data) = _stateManager.GetWidgetContent(
             state,
-            _orchestrator?.CurrentSong,
-            _orchestrator?.CurrentLyrics);
+            source?.CurrentSong,
+            source?.CurrentLyrics,
+            source?.ErrorMessage);
 
-        WidgetManager.GetDefault().UpdateWidget(new WidgetUpdateRequestOptions(_activeWidgetId)
-        {
-            Template = template,
-            Data = data
-        });
+        PushToWidget(widgetId, template, data);
     }
 
     private void UpdateWidgetError(string message)
     {
-        if (_activeWidgetId == null) return;
+        var widgetId = GetActiveWidgetId();
+        if (widgetId == null) return;
 
         var (template, data) = _stateManager.GetWidgetContent(
             RecognitionState.Error,
             errorMessage: message);
 
-        WidgetManager.GetDefault().UpdateWidget(new WidgetUpdateRequestOptions(_activeWidgetId)
+        PushToWidget(widgetId, template, data);
+    }
+
+    private static void PushToWidget(string widgetId, string template, string data)
+    {
+        WidgetManager.GetDefault().UpdateWidget(new WidgetUpdateRequestOptions(widgetId)
         {
             Template = template,
             Data = data
         });
+    }
+
+    private static void StopAndDispose(MusicRecognitionOrchestrator? orchestrator)
+    {
+        if (orchestrator == null) return;
+
+        orchestrator.Stop();
+        orchestrator.Dispose();
+    }
+
+    private string? GetActiveWidgetId()
+    {
+        lock (_gate)
+        {
+            return _activeWidgetId;
+        }
+    }
+
+    private MusicRecognitionOrchestrator? GetOrchestrator()
+    {
+        lock (_gate)
+        {
+            return _orchestrator;
+        }
+    }
+
+    private MusicRecognitionOrchestrator? DetachOrchestrator()
+    {
+        lock (_gate)
+        {
+            var orchestrator = _orchestrator;
+            _orchestrator = null;
+            return orchestrator;
+        }
     }
 }
