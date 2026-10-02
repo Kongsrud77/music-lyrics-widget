@@ -47,9 +47,14 @@ public static class Program
         var noWidgetsLeft = new ManualResetEvent(false);
         var providerClsid = Guid.Parse(WidgetProviderIds.ProviderClsid);
 
-        using var server = new ComServer(
-            providerClsid,
-            () => new LyricsWidgetProvider(onLastWidgetDeleted: () => noWidgetsLeft.Set()));
+        // One provider per process: a Widget Host restart calls CreateInstance again, and a second provider would
+        // run its own orchestrator (and microphone loop) next to the first. ExecutionAndPublication runs the factory
+        // once even when CreateInstance is called concurrently (and caches a factory exception for later calls).
+        var provider = new Lazy<LyricsWidgetProvider>(
+            () => new LyricsWidgetProvider(onLastWidgetDeleted: () => noWidgetsLeft.Set()),
+            LazyThreadSafetyMode.ExecutionAndPublication);
+
+        using var server = new ComServer(providerClsid, () => provider.Value);
 
         noWidgetsLeft.WaitOne();
     }
