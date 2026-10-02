@@ -8,17 +8,34 @@ namespace MusicLyricsWidget.Services;
 
 public class SongIdentificationService : ISongIdentifier
 {
+    private const int StatusSuccess = 0;
+    private const int StatusNoResult = 1001;
+    private const int RequestTimeoutSeconds = 15;
+    private const string UnknownErrorMessage = "unknown error";
+
+    // One client for the whole process: HttpClient is meant to be shared (a new one per instance leaks sockets).
+    // It is never mutated after creation: no BaseAddress and no default headers, every request carries an absolute URL.
+    private static readonly HttpClient SharedHttpClient = new()
+    {
+        Timeout = TimeSpan.FromSeconds(RequestTimeoutSeconds)
+    };
+
     private readonly HttpClient _httpClient;
     private readonly string _host;
     private readonly string _accessKey;
     private readonly string _accessSecret;
 
     public SongIdentificationService(string host, string accessKey, string accessSecret)
+        : this(host, accessKey, accessSecret, SharedHttpClient)
+    {
+    }
+
+    internal SongIdentificationService(string host, string accessKey, string accessSecret, HttpClient httpClient)
     {
         _host = host.Trim();
         _accessKey = accessKey.Trim();
         _accessSecret = accessSecret.Trim();
-        _httpClient = new HttpClient();
+        _httpClient = httpClient;
     }
 
     /// <summary>
@@ -47,13 +64,17 @@ public class SongIdentificationService : ISongIdentifier
         content.Add(new StringContent(timestamp), "timestamp");
         content.Add(new StringContent(audioData.Length.ToString()), "sample_bytes");
 
-        var response = await _httpClient.PostAsync(
+        using var response = await _httpClient.PostAsync(
             $"https://{_host}/v1/identify",
             content,
             cancellationToken);
 
         var json = await response.Content.ReadAsStringAsync(cancellationToken);
         LastRawResponse = json;
+
+        if (!response.IsSuccessStatusCode)
+            throw new AcrCloudException($"ACRCloud request failed: HTTP {(int)response.StatusCode} {response.ReasonPhrase}");
+
         return ParseResponse(json);
     }
 
@@ -72,13 +93,29 @@ public class SongIdentificationService : ISongIdentifier
         return Convert.ToBase64String(hash);
     }
 
+    /// <summary>
+    /// Maps an ACRCloud response to a song. Returns null when ACRCloud found no match; throws
+    /// <see cref="AcrCloudException"/> for any other status, so a bad key or quota is not mistaken for silence.
+    /// </summary>
     internal static SongInfo? ParseResponse(string json)
     {
         var root = JObject.Parse(json);
-        var statusCode = root["status"]?["code"]?.Value<int>();
+        var status = root["status"];
+        var statusCode = status?["code"]?.Value<int?>();
 
-        if (statusCode != 0)
-            return null; // No match or error
+        if (statusCode == null)
+            throw new AcrCloudException("ACRCloud response contained no status code.");
+
+        if (statusCode == StatusNoResult)
+            return null;
+
+        if (statusCode != StatusSuccess)
+        {
+            var message = status?["msg"]?.Value<string>();
+            if (string.IsNullOrWhiteSpace(message))
+                message = UnknownErrorMessage;
+            throw new AcrCloudException($"ACRCloud error {statusCode}: {message}", statusCode);
+        }
 
         var music = root["metadata"]?["music"]?.FirstOrDefault();
         if (music == null)

@@ -25,6 +25,10 @@ public class AcrCloudResponseTests
         { "status": { "msg": "No result", "code": 1001, "version": "1.0" } }
         """;
 
+    private const string InvalidKeyJson = """
+        { "status": { "msg": "Missing/Invalid Access Key", "code": 3001, "version": "1.0" } }
+        """;
+
     private const string EmptyMusicJson = """
         { "status": { "msg": "Success", "code": 0 }, "metadata": { "music": [] } }
         """;
@@ -43,9 +47,41 @@ public class AcrCloudResponseTests
     }
 
     [Fact]
-    public void ParseResponse_NonZeroStatus_ReturnsNull()
+    public void ParseResponse_NoResultStatus_ReturnsNull()
     {
         Assert.Null(SongIdentificationService.ParseResponse(NoResultJson));
+    }
+
+    [Fact]
+    public void ParseResponse_InvalidAccessKeyStatus_ThrowsWithCodeAndAcrCloudMessage()
+    {
+        var ex = Assert.Throws<AcrCloudException>(() => SongIdentificationService.ParseResponse(InvalidKeyJson));
+
+        Assert.Equal(3001, ex.StatusCode);
+        Assert.Contains("3001", ex.Message);
+        Assert.Contains("Missing/Invalid Access Key", ex.Message);
+    }
+
+    [Fact]
+    public void ParseResponse_ErrorStatusWithoutMessage_FallsBackToUnknownError()
+    {
+        var ex = Assert.Throws<AcrCloudException>(() =>
+            SongIdentificationService.ParseResponse("""{ "status": { "code": 3003 } }"""));
+
+        Assert.Equal(3003, ex.StatusCode);
+        Assert.Equal("ACRCloud error 3003: unknown error", ex.Message);
+    }
+
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("""{ "status": { "msg": "odd" } }""")]
+    [InlineData("""{ "status": { "code": null } }""")]
+    public void ParseResponse_MissingStatusCode_ThrowsWithoutStatusCode(string json)
+    {
+        var ex = Assert.Throws<AcrCloudException>(() => SongIdentificationService.ParseResponse(json));
+
+        Assert.Null(ex.StatusCode);
+        Assert.Equal("ACRCloud response contained no status code.", ex.Message);
     }
 
     [Fact]
