@@ -1,0 +1,63 @@
+{
+  "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+  "type": "AdaptiveCard",
+  "version": "1.6",
+  "body": [
+    {
+      "type": "Container",
+      "items": [
+        {
+          "type": "ColumnSet",
+          "columns": [
+            {
+              "type": "Column",
+              "width": "stretch",
+              "items": [
+                {
+                  "type": "TextBlock",
+                  "text": "${songTitle}",
+                  "weight": "Bolder",
+                  "size": "Medium",
+                  "wrap": true
+                },
+                {
+                  "type": "TextBlock",
+                  "text": "${artist}",
+                  "isSubtle": true,
+                  "spacing": "None"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "Container",
+          "spacing": "Medium",
+          "items": [
+            {
+              "type": "TextBlock",
+              "text": "${lyrics}",
+              "wrap": true,
+              "maxLines": 20,
+              "size": "Small"
+            }
+          ]
+        },
+        {
+          "type": "TextBlock",
+          "text": "Source: ${source}",
+          "isSubtle": true,
+          "size": "Small",
+          "spacing": "Medium"
+        }
+      ]
+    }
+  ],
+  "actions": [
+    {
+      "type": "Action.Execute",
+      "title": "Listen Again",
+      "verb": "listenNow"
+    }
+  ]
+}

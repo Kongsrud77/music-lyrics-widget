@@ -1,0 +1,38 @@
+{
+  "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+  "type": "AdaptiveCard",
+  "version": "1.6",
+  "body": [
+    {
+      "type": "Container",
+      "items": [
+        {
+          "type": "TextBlock",
+          "text": "🎵 Music Lyrics",
+          "weight": "Bolder",
+          "size": "Medium"
+        },
+        {
+          "type": "TextBlock",
+          "text": "Something went wrong",
+          "color": "Attention",
+          "spacing": "Medium"
+        },
+        {
+          "type": "TextBlock",
+          "text": "${errorMessage}",
+          "wrap": true,
+          "isSubtle": true,
+          "size": "Small"
+        }
+      ]
+    }
+  ],
+  "actions": [
+    {
+      "type": "Action.Execute",
+      "title": "Try Again",
+      "verb": "listenNow"
+    }
+  ]
+}

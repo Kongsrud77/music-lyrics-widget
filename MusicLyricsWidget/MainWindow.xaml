@@ -1,0 +1,55 @@
+<Window
+    x:Class="MusicLyricsWidget.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <Grid Padding="32" RowSpacing="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <TextBlock Grid.Row="0" Text="Music Lyrics Widget" FontSize="28" FontWeight="Bold"/>
+
+        <TextBlock Grid.Row="1" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                   Text="Configure your ACRCloud API credentials, then test music recognition."/>
+
+        <!-- ACRCloud Host -->
+        <TextBox Grid.Row="2" x:Name="HostInput"
+                 Header="ACRCloud Host"
+                 PlaceholderText="identify-eu-west-1.acrcloud.com"/>
+
+        <!-- Access Key -->
+        <TextBox Grid.Row="3" x:Name="AccessKeyInput"
+                 Header="Access Key"
+                 PlaceholderText="Your ACRCloud access key"/>
+
+        <!-- Access Secret -->
+        <PasswordBox Grid.Row="4" x:Name="AccessSecretInput"
+                     Header="Access Secret"
+                     PlaceholderText="Your ACRCloud access secret"/>
+
+        <!-- Buttons -->
+        <StackPanel Grid.Row="5" Orientation="Horizontal" Spacing="8">
+            <Button x:Name="SaveButton" Content="Save Settings"
+                    Style="{StaticResource AccentButtonStyle}"/>
+            <Button x:Name="TestButton" Content="Test Recognition"/>
+        </StackPanel>
+
+        <!-- Status -->
+        <TextBlock Grid.Row="6" x:Name="StatusText" TextWrapping="Wrap"
+                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+
+        <!-- Lyrics output -->
+        <ScrollViewer Grid.Row="7">
+            <TextBlock x:Name="LyricsText" TextWrapping="Wrap" IsTextSelectionEnabled="True"/>
+        </ScrollViewer>
+    </Grid>
+</Window>

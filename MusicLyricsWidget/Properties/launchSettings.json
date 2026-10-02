@@ -1,0 +1,13 @@
+{
+  "profiles": {
+    "MusicLyricsWidget (Package)": {
+      "commandName": "MsixPackage",
+      "commandLineArgs": "",
+      "alwaysReinstallApp": false,
+      "remoteDebugEnabled": false,
+      "allowLocalNetworkLoopbackProperty": true,
+      "nativeDebugging": false,
+      "doNotLaunchApp": false
+    }
+  }
+}
