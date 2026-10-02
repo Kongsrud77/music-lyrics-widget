@@ -1,23 +1,28 @@
 using System.Runtime.InteropServices;
+using Microsoft.Windows.Widgets.Providers;
 using MusicLyricsWidget.Widget;
+using WinRT;
 
 namespace MusicLyricsWidget;
 
 public static class Program
 {
+    private const string RegisterProcessAsComServerArgument = "-RegisterProcessAsComServer";
+    private const string ComServerThreadName = "WidgetProviderComServer";
+
     [STAThread]
     static void Main(string[] args)
     {
         WinRT.ComWrappersSupport.InitializeComWrappers();
 
-        if (args.Length > 0 && args.Contains("-RegisterProcessAsComServer"))
+        if (args.Length > 0 && args.Contains(RegisterProcessAsComServerArgument))
         {
-            // Activated as widget provider via COM
-            var providerGuid = Guid.Parse("3B37F72B-9C04-418C-88AE-BEB6058AE758");
-            using var server = new ComServer(providerGuid, () => new LyricsWidgetProvider());
-
-            var exitEvent = new ManualResetEvent(false);
-            exitEvent.WaitOne();
+            // Activated as widget provider via COM. Main stays STA for the WinUI path, so the
+            // server runs on its own MTA thread (as Microsoft's reference provider does).
+            var serverThread = new Thread(RunComServer) { Name = ComServerThreadName };
+            serverThread.SetApartmentState(ApartmentState.MTA);
+            serverThread.Start();
+            serverThread.Join();
         }
         else
         {
@@ -31,6 +36,22 @@ public static class Program
             });
         }
 
+    }
+
+    /// <summary>
+    /// Serves the widget provider class object until the last widget is deleted, then revokes it.
+    /// </summary>
+    private static void RunComServer()
+    {
+        // Deliberately not disposed: a provider instance may still signal it while the process shuts down.
+        var noWidgetsLeft = new ManualResetEvent(false);
+        var providerClsid = Guid.Parse(WidgetProviderIds.ProviderClsid);
+
+        using var server = new ComServer(
+            providerClsid,
+            () => new LyricsWidgetProvider(onLastWidgetDeleted: () => noWidgetsLeft.Set()));
+
+        noWidgetsLeft.WaitOne();
     }
 }
 
@@ -59,9 +80,9 @@ internal class ComServer : IDisposable
     [DllImport("ole32.dll")]
     private static extern int CoResumeClassObjects();
 
-    public ComServer(Guid clsid, Func<object> factory)
+    public ComServer(Guid clsid, Func<IWidgetProvider> factory)
     {
-        var classFactory = new GenericClassFactory(factory);
+        var classFactory = new WidgetProviderClassFactory(factory);
         var hr = CoRegisterClassObject(
             clsid,
             classFactory,
@@ -69,7 +90,7 @@ internal class ComServer : IDisposable
             REGCLS_MULTIPLEUSE | REGCLS_SUSPENDED,
             out _cookie);
         Marshal.ThrowExceptionForHR(hr);
-        CoResumeClassObjects();
+        Marshal.ThrowExceptionForHR(CoResumeClassObjects());
     }
 
     public void Dispose()
@@ -82,12 +103,19 @@ internal class ComServer : IDisposable
     }
 }
 
+/// <summary>
+/// Creates widget providers as WinRT objects. The Widget Host calls the provider through the WinRT
+/// <see cref="IWidgetProvider"/> vtable, which a classic CCW from <c>Marshal.GetIUnknownForObject</c> lacks.
+/// </summary>
 [ComVisible(true)]
-internal class GenericClassFactory : IClassFactory
+internal class WidgetProviderClassFactory : IClassFactory
 {
-    private readonly Func<object> _factory;
+    private const int S_OK = 0;
+    private const int CLASS_E_NOAGGREGATION = unchecked((int)0x80040110);
 
-    public GenericClassFactory(Func<object> factory)
+    private readonly Func<IWidgetProvider> _factory;
+
+    public WidgetProviderClassFactory(Func<IWidgetProvider> factory)
     {
         _factory = factory;
     }
@@ -96,14 +124,20 @@ internal class GenericClassFactory : IClassFactory
     {
         ppvObject = IntPtr.Zero;
         if (pUnkOuter != IntPtr.Zero)
-            return unchecked((int)0x80040110); // CLASS_E_NOAGGREGATION
+            return CLASS_E_NOAGGREGATION;
 
-        var instance = _factory();
-        ppvObject = Marshal.GetIUnknownForObject(instance);
-        return 0; // S_OK
+        IntPtr unknown = MarshalInspectable<IWidgetProvider>.FromManaged(_factory());
+        try
+        {
+            return Marshal.QueryInterface(unknown, in riid, out ppvObject);
+        }
+        finally
+        {
+            Marshal.Release(unknown);
+        }
     }
 
-    public int LockServer(bool fLock) => 0;
+    public int LockServer(bool fLock) => S_OK;
 }
 
 [ComImport]

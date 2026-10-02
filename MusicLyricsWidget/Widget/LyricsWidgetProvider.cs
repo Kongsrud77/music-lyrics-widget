@@ -6,8 +6,24 @@ namespace MusicLyricsWidget.Widget;
 public class LyricsWidgetProvider : IWidgetProvider
 {
     private readonly WidgetStateManager _stateManager = new();
+    private readonly Action _onLastWidgetDeleted;
     private MusicRecognitionOrchestrator? _orchestrator;
     private string? _activeWidgetId;
+
+    /// <summary>
+    /// Creates the provider and recovers the widget that is already running after a provider restart.
+    /// </summary>
+    /// <param name="onLastWidgetDeleted">Invoked when no widget is left, so the COM server process can exit.</param>
+    public LyricsWidgetProvider(Action onLastWidgetDeleted)
+    {
+        _onLastWidgetDeleted = onLastWidgetDeleted;
+
+        var runningWidgets = WidgetManager.GetDefault().GetWidgetInfos();
+        if (runningWidgets is { Length: > 0 })
+        {
+            _activeWidgetId = runningWidgets[0].WidgetContext.Id;
+        }
+    }
 
     public void CreateWidget(WidgetContext widgetContext)
     {
@@ -24,11 +40,16 @@ public class LyricsWidgetProvider : IWidgetProvider
             _orchestrator = null;
             _activeWidgetId = null;
         }
+
+        if (_activeWidgetId == null)
+        {
+            _onLastWidgetDeleted();
+        }
     }
 
     public void OnActionInvoked(WidgetActionInvokedArgs actionInvokedArgs)
     {
-        if (actionInvokedArgs.Verb == "listenNow")
+        if (actionInvokedArgs.Verb == WidgetProviderIds.ListenNowVerb)
         {
             StartListening();
         }
@@ -42,6 +63,7 @@ public class LyricsWidgetProvider : IWidgetProvider
     public void Activate(WidgetContext widgetContext)
     {
         _activeWidgetId = widgetContext.Id;
+        UpdateWidget(_orchestrator?.State ?? RecognitionState.Idle);
     }
 
     public void Deactivate(string widgetId)

@@ -31,6 +31,7 @@
     <Compile Include="..\MusicLyricsWidget\Models\*.cs" Link="App\Models\%(Filename)%(Extension)" />
     <Compile Include="..\MusicLyricsWidget\Services\*.cs" Link="App\Services\%(Filename)%(Extension)" />
     <Compile Include="..\MusicLyricsWidget\Widget\WidgetStateManager.cs" Link="App\Widget\%(Filename)%(Extension)" />
+    <Compile Include="..\MusicLyricsWidget\Widget\WidgetProviderIds.cs" Link="App\Widget\%(Filename)%(Extension)" />
   </ItemGroup>
 
   <!-- WidgetStateManager reads the card templates from AppContext.BaseDirectory\Widget\WidgetTemplates. -->
