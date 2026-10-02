@@ -82,6 +82,16 @@ public class SongIdentificationServiceTests
     }
 
     [Fact]
+    public async Task IdentifyAsync_Http200WithNoFingerprintStatus_ReturnsNull()
+    {
+        const string body = """{ "status": { "msg": "Can't generate fingerprint", "code": 2004, "version": "1.0" } }""";
+        var service = CreateService(new StubHttpMessageHandler(HttpStatusCode.OK, body));
+
+        Assert.Null(await service.IdentifyAsync(Audio));
+        Assert.Equal(body, service.LastRawResponse);
+    }
+
+    [Fact]
     public async Task IdentifyAsync_Http200WithErrorStatus_ThrowsAcrCloudExceptionAndKeepsRawResponse()
     {
         var service = CreateService(new StubHttpMessageHandler(HttpStatusCode.OK, InvalidKeyJson));

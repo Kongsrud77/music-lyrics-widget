@@ -10,6 +10,9 @@ public class SongIdentificationService : ISongIdentifier
 {
     private const int StatusSuccess = 0;
     private const int StatusNoResult = 1001;
+
+    // "Unable to generate fingerprint": silence or too little audio in the sample, i.e. no music, not a failure.
+    private const int StatusNoFingerprint = 2004;
     private const int RequestTimeoutSeconds = 15;
     private const string UnknownErrorMessage = "unknown error";
 
@@ -94,8 +97,8 @@ public class SongIdentificationService : ISongIdentifier
     }
 
     /// <summary>
-    /// Maps an ACRCloud response to a song. Returns null when ACRCloud found no match; throws
-    /// <see cref="AcrCloudException"/> for any other status, so a bad key or quota is not mistaken for silence.
+    /// Maps an ACRCloud response to a song. Returns null when ACRCloud found no match or could not
+    /// fingerprint the sample (silence); throws <see cref="AcrCloudException"/> for any other status, so a bad key or quota is not mistaken for silence.
     /// </summary>
     internal static SongInfo? ParseResponse(string json)
     {
@@ -106,7 +109,7 @@ public class SongIdentificationService : ISongIdentifier
         if (statusCode == null)
             throw new AcrCloudException("ACRCloud response contained no status code.");
 
-        if (statusCode == StatusNoResult)
+        if (statusCode == StatusNoResult || statusCode == StatusNoFingerprint)
             return null;
 
         if (statusCode != StatusSuccess)

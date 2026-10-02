@@ -21,10 +21,6 @@ public class AcrCloudResponseTests
         }
         """;
 
-    private const string NoResultJson = """
-        { "status": { "msg": "No result", "code": 1001, "version": "1.0" } }
-        """;
-
     private const string InvalidKeyJson = """
         { "status": { "msg": "Missing/Invalid Access Key", "code": 3001, "version": "1.0" } }
         """;
@@ -46,10 +42,15 @@ public class AcrCloudResponseTests
         Assert.Equal(TimeSpan.FromSeconds(215), song.Duration);
     }
 
-    [Fact]
-    public void ParseResponse_NoResultStatus_ReturnsNull()
+    // 1001 = no result; 2004 = unable to generate fingerprint (silence or too little audio): both mean "no music".
+    [Theory]
+    [InlineData(1001, "No result")]
+    [InlineData(2004, "Can't generate fingerprint")]
+    public void ParseResponse_StatusMeaningNoMusic_ReturnsNull(int code, string msg)
     {
-        Assert.Null(SongIdentificationService.ParseResponse(NoResultJson));
+        var json = $$"""{ "status": { "msg": "{{msg}}", "code": {{code}}, "version": "1.0" } }""";
+
+        Assert.Null(SongIdentificationService.ParseResponse(json));
     }
 
     [Fact]
