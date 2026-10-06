@@ -1290,3 +1290,27 @@ and add:
 ### After Task 6 (controller)
 
 Final whole-branch review; deploy (stop all `MusicLyricsWidget.exe`, copy changed files into `AppX` from the appxrecipe); live check with the user: medium and large card follow the song, panel close/open, song change.
+
+## Udfald (06-10-2026)
+
+Task 0–6 gennemført med review pr. trin, samlet branch-review og én fix-runde. 238/238 tests, build 0 warnings.
+Task 0 (live): formlen db_end + (klip − sample_end) fulgte målt forløbet tid med 18 ms fejl (play_offset_ms: 122 ms).
+
+### Afgørelser (pris hvis forkert)
+- Formel som primær, `play_offset_ms` som fallback — målt mest præcis (~0,1–0,5 s, kan justeres via LineLead).
+- Planfejl i Halt-testen (22 s er linje 2) — implementeren rykkede til 25 s med uændrede assertions (ingen).
+- `OnLineChanged` videresender kun i `DisplayingLyrics` — en sen urhændelse må ikke tegne et andet kort (én mistet gentegning).
+- `SetState(DisplayingLyrics)` genberegner linjen før uret startes — gendannet kort viser aktuel linje (ingen).
+- Resume: `Refresh` + `Run`, så `StartLoop`, så katch-up-tegning via `OnLineChanged` — fejlende tegning kan ikke stoppe lytningen, og et samtidigt lukket panel kan altid pause (ingen).
+- Activate kalder `Resume()` før `PushState` — fjerner forældet tegning ved åbning (en overflødig, harmløs dobbelt-push).
+- Varighed < 1 s = ukendt (både klemning og `SongInfo.Duration`) — ellers fryser kortet på intro (ingen).
+
+### Backlog
+- Lille orchestrator-lås om Pause/Resume (mikrosekund-vindue hvor loopet kan starte bag lukket panel).
+- Versionsstempel på gengivelser (tråde kan levere ude af rækkefølge; kortet heler selv).
+- Store kort: tre enkeltlinje-blokke for forrige linjer (wrap kan skjule linjen lige før den aktuelle).
+- LRC-pauser: tomme tidsstemplede linjer som "♪" i stedet for at holde sidste linje fed.
+- Ankertidsstempel ved sidst beholdte buffer + hysterese mod små baglæns re-synk.
+- Hurtigere genkendelse ved sangskift; spring ikke den straks-cyklus over ved hurtig luk/åbn.
+- LRCLIB: 3 × 503 i træk sker i spidsbelastning — overvej længere retry-budget.
+- Testhuller: formel med db_end ≠ sample_end, kort-niveau for null-indeks/intro, binding-swap, `LyricsWindow.For`-summary.
