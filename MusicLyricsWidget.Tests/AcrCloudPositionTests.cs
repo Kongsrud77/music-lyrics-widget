@@ -47,6 +47,18 @@ public class AcrCloudPositionTests
         Assert.Equal(TimeSpan.FromSeconds(300), SongIdentificationService.PositionAtSampleEnd(music, TenSeconds, TimeSpan.FromSeconds(300)));
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(999)]
+    public void ASongDurationUnderOneSecond_IsTreatedAsUnknown_NotAsAClampToZero(int songDurationMs)
+    {
+        var music = Music(new { play_offset_ms = 9040 });
+
+        Assert.Equal(
+            TimeSpan.FromMilliseconds(9040),
+            SongIdentificationService.PositionAtSampleEnd(music, TenSeconds, TimeSpan.FromMilliseconds(songDurationMs)));
+    }
+
     [Fact]
     public void NegativePosition_IsClampedToZero()
     {
@@ -82,5 +94,21 @@ public class AcrCloudPositionTests
 
         Assert.NotNull(song);
         Assert.Equal(TimeSpan.FromMilliseconds(10_000), song.PositionAtSampleEnd);
+    }
+
+    [Fact]
+    public void ParseResponse_WithAZeroDuration_KeepsThePositionAndLeavesTheDurationUnknown()
+    {
+        const string json = """
+            { "status": { "code": 0, "msg": "Success" },
+              "metadata": { "music": [ { "title": "Come Together", "artists": [ { "name": "The Beatles" } ],
+                "duration_ms": 0, "play_offset_ms": 9040 } ] } }
+            """;
+
+        var song = SongIdentificationService.ParseResponse(json, TenSeconds);
+
+        Assert.NotNull(song);
+        Assert.Equal(TimeSpan.FromMilliseconds(9040), song.PositionAtSampleEnd);
+        Assert.Null(song.Duration);                  // the line clock stops short of a "song" that ends before it starts
     }
 }

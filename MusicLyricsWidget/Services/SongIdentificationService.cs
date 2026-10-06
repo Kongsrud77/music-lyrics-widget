@@ -21,6 +21,10 @@ public class SongIdentificationService : ISongIdentifier
     private const int WavByteRateOffset = 28;
     private const int WavDataSizeOffset = 40;
 
+    // A song shorter than this is a data glitch (ACRCloud reports duration_ms 0 for some tracks), not a real length.
+    // Mirrors LyricsService's own minimum for a plausible duration.
+    private static readonly TimeSpan MinPlausibleSongDuration = TimeSpan.FromSeconds(1);
+
     // One client for the whole process: HttpClient is meant to be shared (a new one per instance leaks sockets).
     // It is never mutated after creation: no BaseAddress and no default headers, every request carries an absolute URL.
     private static readonly HttpClient SharedHttpClient = new()
@@ -137,9 +141,10 @@ public class SongIdentificationService : ISongIdentifier
             AcrId = music["acrid"]?.Value<string>(),
         };
 
+        // An implausible duration stays unknown: the line clock would otherwise stop ticking at once, "after the song".
         var durationMs = music["duration_ms"]?.Value<int>();
-        if (durationMs.HasValue)
-            song.Duration = TimeSpan.FromMilliseconds(durationMs.Value);
+        if (durationMs.HasValue && TimeSpan.FromMilliseconds(durationMs.Value) is var duration && duration >= MinPlausibleSongDuration)
+            song.Duration = duration;
 
         song.PositionAtSampleEnd = PositionAtSampleEnd(music, sampleDuration, song.Duration);
 
@@ -148,7 +153,8 @@ public class SongIdentificationService : ISongIdentifier
 
     /// <summary>
     /// Song position at the end of the sample: where the match ended in the song plus the part of the sample after
-    /// the match. Falls back to play_offset_ms when that cannot be computed; null without any offset. Clamped to the song.
+    /// the match. Falls back to play_offset_ms when that cannot be computed; null without any offset. Clamped to the
+    /// song, unless its duration is unknown or implausibly short (under one second), which clamps nothing.
     /// </summary>
     internal static TimeSpan? PositionAtSampleEnd(JToken music, TimeSpan? sampleDuration, TimeSpan? songDuration)
     {
@@ -164,7 +170,7 @@ public class SongIdentificationService : ISongIdentifier
             return null;
         if (position < TimeSpan.Zero)
             return TimeSpan.Zero;
-        return songDuration != null && position > songDuration ? songDuration : position;
+        return songDuration is { } duration && duration >= MinPlausibleSongDuration && position > duration ? duration : position;
     }
 
     /// <summary>Length of a canonical PCM WAV (as WrapInWav writes it); null when the data is not one.</summary>
