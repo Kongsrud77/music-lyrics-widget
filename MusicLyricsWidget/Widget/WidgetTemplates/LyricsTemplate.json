@@ -4,53 +4,46 @@
   "version": "1.6",
   "body": [
     {
-      "type": "Container",
-      "items": [
-        {
-          "type": "ColumnSet",
-          "columns": [
-            {
-              "type": "Column",
-              "width": "stretch",
-              "items": [
-                {
-                  "type": "TextBlock",
-                  "text": "${songTitle}",
-                  "weight": "Bolder",
-                  "size": "Medium",
-                  "wrap": true
-                },
-                {
-                  "type": "TextBlock",
-                  "text": "${artist}",
-                  "isSubtle": true,
-                  "spacing": "None"
-                }
-              ]
-            }
-          ]
-        },
-        {
-          "type": "Container",
-          "spacing": "Medium",
-          "items": [
-            {
-              "type": "TextBlock",
-              "text": "${lyrics}",
-              "wrap": true,
-              "maxLines": 20,
-              "size": "Small"
-            }
-          ]
-        },
-        {
-          "type": "TextBlock",
-          "text": "Source: ${source}",
-          "isSubtle": true,
-          "size": "Small",
-          "spacing": "Medium"
-        }
-      ]
+      "type": "TextBlock",
+      "text": "${songTitle}",
+      "weight": "Bolder",
+      "size": "Medium",
+      "wrap": true,
+      "maxLines": 1
+    },
+    {
+      "type": "TextBlock",
+      "text": "${artist}",
+      "isSubtle": true,
+      "spacing": "None",
+      "wrap": true,
+      "maxLines": 1
+    },
+    {
+      "type": "TextBlock",
+      "$when": "${$host.widgetSize==\"medium\"}",
+      "text": "${lyrics}",
+      "wrap": true,
+      "maxLines": 6,
+      "size": "Small",
+      "spacing": "Small"
+    },
+    {
+      "type": "TextBlock",
+      "$when": "${$host.widgetSize==\"large\"}",
+      "text": "${lyrics}",
+      "wrap": true,
+      "maxLines": 14,
+      "size": "Small",
+      "spacing": "Small"
+    },
+    {
+      "type": "TextBlock",
+      "$when": "${$host.widgetSize==\"large\"}",
+      "text": "Source: ${source}",
+      "isSubtle": true,
+      "size": "Small",
+      "spacing": "Small"
     }
   ],
   "actions": [

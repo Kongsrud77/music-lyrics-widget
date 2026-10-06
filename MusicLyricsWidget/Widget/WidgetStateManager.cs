@@ -7,6 +7,10 @@ namespace MusicLyricsWidget.Widget;
 
 public class WidgetStateManager
 {
+    // The large card shows 14 lyrics lines (LyricsTemplate.json caps each size with maxLines, because the Widgets
+    // Board drops an element that does not fit, plus everything after it); sending more is wasted payload.
+    private const int MaxLyricsLines = 14;
+
     private readonly string _listeningTemplate;
     private readonly string _lyricsTemplate;
     private readonly string _errorTemplate;
@@ -49,7 +53,7 @@ public class WidgetStateManager
                 {
                     songTitle = song.Title,
                     artist = song.Artist,
-                    lyrics = lyrics.PlainLyrics,
+                    lyrics = FirstLines(lyrics.PlainLyrics, MaxLyricsLines),
                     source = lyrics.Source
                 })),
 
@@ -75,4 +79,7 @@ public class WidgetStateManager
 
     private static string CreateData(object data) =>
         JsonConvert.SerializeObject(data);
+
+    private static string FirstLines(string text, int count) =>
+        string.Join("\n", text.Split('\n').Take(count));
 }
