@@ -51,6 +51,18 @@ public class LyricsTemplateLayoutTests
     }
 
     [Fact]
+    public void TheSourceLine_ShowsOnlyOnTheLargeCard_AndNotWithoutASource()
+    {
+        var source = Assert.Single(
+            Template()["body"]!.OfType<JObject>(),
+            b => (string?)b["text"] == "Source: ${source}");
+
+        var when = (string?)source["$when"];
+        Assert.Contains("\"large\"", when);
+        Assert.Contains("source != ''", when);   // "No lyrics found" and the like carry no source: no bare "Source: "
+    }
+
+    [Fact]
     public void PlainData_IsLimitedToWhatTheLargeCardShows()
     {
         var plain = string.Join("\n", Enumerable.Range(1, 40).Select(i => $"Line {i}"));
