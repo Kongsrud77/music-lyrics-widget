@@ -4,7 +4,6 @@ namespace MusicLyricsWidget.Services;
 
 public class AudioCaptureService : IAudioCapture
 {
-    private const int BufferMilliseconds = 500;
     private const int BitsPerSample = 16;
     private const int BytesPerSample = BitsPerSample / 8;
     private const int CaptureIdle = 0;
@@ -19,13 +18,17 @@ public class AudioCaptureService : IAudioCapture
     private readonly Func<int> _deviceCount;
     private int _captureState = CaptureIdle;
 
+    /// <summary>
+    /// Records through <see cref="RawMicrophoneCapture"/> (WASAPI RAW): the processed WinMM stream of laptop
+    /// microphone arrays suppresses music to silence, so ACRCloud never matched it.
+    /// </summary>
     public AudioCaptureService(int sampleRate = 44100, int channels = 1, int recordSeconds = 10)
         : this(
             sampleRate,
             channels,
             recordSeconds,
-            format => new WaveInEvent { WaveFormat = format, BufferMilliseconds = BufferMilliseconds },
-            () => WaveInEvent.DeviceCount)
+            format => new RawMicrophoneCapture(format),
+            () => CoreAudioInterop.HasDefaultMicrophone() ? 1 : 0)
     {
     }
 
