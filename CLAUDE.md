@@ -22,7 +22,11 @@ C# / .NET 8 / WinUI 3 / Windows App SDK 1.5, MSIX-pakket, kun x64. Ligger under 
 - `Widget/WidgetStateManager.cs` — `RecognitionState` → (Adaptive Card-template, data-JSON).
 - `Services/MusicRecognitionOrchestrator.cs` — Timer-loop (30 s): capture → identify → lyrics. Interfaces `IAudioCapture`,
   `ISongIdentifier`, `ILyricsProvider` gør den testbar med fakes.
-- `Services/AudioCaptureService.cs` — NAudio, 10 s mono 16-bit; ny `WaveInEvent` pr. optagelse, disposes altid; samtidige optagelser afvises.
+- `Services/AudioCaptureService.cs` — 10 s mono 16-bit pr. optagelse via `RawMicrophoneCapture` (NAudio `IWaveIn`);
+  disposes altid; samtidige optagelser afvises.
+- `Services/RawMicrophoneCapture.cs` + `CoreAudioInterop.cs` — WASAPI i RAW-mode (ingen driver-støjdæmpning; WASAPI
+  konverterer til 44,1 kHz). Laptoppens Intel Smart Sound-array klipper ellers musik til digital stilhed (målt: 50–98 %
+  nul-samples, aldrig match). Brug ALDRIG NAudios `IAudioClient2` (forkert vtable-plads → 0x88890001); se interop-laget.
 - `Services/SongIdentificationService.cs` — ACRCloud `POST /v1/identify`, HMAC-SHA1 signatur v1 (verificeret).
 - `Services/LyricsService.cs` — LRCLIB `/api/get` → `/api/search`-fallback + LRC-parser.
 - `MainWindow.xaml(.cs)` + `SettingsManager.cs` — companion-app (nøgler + "Test Recognition" med debug-dump).
@@ -36,7 +40,9 @@ C# / .NET 8 / WinUI 3 / Windows App SDK 1.5, MSIX-pakket, kun x64. Ligger under 
 - Template-felter (`${statusText}`, `${songTitle}`, `${artist}`, `${lyrics}`, `${source}`, `${errorMessage}`) = data i `WidgetStateManager`.
 - Provider-tråde: `_gate` beskytter `_activeWidgetId`/`_orchestrator`. Kald ALDRIG `WidgetManager.UpdateWidget` eller orchestrator
   `Start`/`Stop`/`Dispose` under låsen (Stop udsender Idle synkront). Events fra en udskiftet orchestrator ignoreres (`ReferenceEquals`).
-- `Deactivate` stopper lytningen (privatliv). "Listen Now" skal trykkes igen, når boardet åbnes.
+- Panel lukker → `Deactivate` → orchestrator `Pause()`: mikrofonen slukker (privatliv), men sang/lyrics/tilstand bevares.
+  Panel åbner → `Activate` viser den bevarede tilstand og kalder `Resume()`, som KUN genoptager et pauset loop
+  (aldrig trykket Listen Now → "Ready"). `Stop()` (slet widget, ny Listen Now) nulstiller og ophæver pausen.
 
 ## Fejlsemantik (end-to-end)
 
@@ -62,6 +68,12 @@ C# / .NET 8 / WinUI 3 / Windows App SDK 1.5, MSIX-pakket, kun x64. Ligger under 
 
 - Widgetten mangler i "Tilføj widgets": manglende Screenshot, eller pakken er ikke re-registreret efter en manifest-ændring.
 - Indstillingsvinduet popper op, når widgetten tilføjes: `com:ExeServer Arguments` mangler eller matcher ikke `ComServerArgument`.
-- Kortet viser "No music recognised yet": ingen match (eller en mikrofon der kun leverer stilhed — tjek Windows' privatlivsindstillinger for mikrofonen).
+- Kortet viser "No music recognised yet": ingen match, eller mikrofonen leverer stilhed. Tjek om RAW faktisk blev brugt
+  (`RawMicrophoneCapture.IsRaw`) og Windows' privatlivsindstillinger for mikrofonen. En probe der måler andelen af
+  nul-samples afslører en støjgate (rigtig rumstøj er aldrig præcis 0).
+- Windows logger sidste mikrofonbrug pr. app: `HKCU\...\CapabilityAccessManager\ConsentStore\microphone\<PFN>`
+  (`LastUsedTimeStart/Stop`) — viser om widget-processen overhovedet optager.
+- Deploy af kodeændringer: stop ALLE `MusicLyricsWidget.exe`-processer, kopiér ændrede filer til `AppX` (layout ud fra
+  `MusicLyricsWidget.build.appxrecipe`); `resources.pri` kan være memory-mappet af systemet → overskriv kun ændrede filer.
 - Fejlkort med "ACRCloud error 3001/3014": nøgler eller signatur. Brug "Test Recognition" i companion-appen, som viser den rå respons.
 - Backlog og afgørelser fra fix-runden: `docs/plans/2026-10-02-widget-p0-p1.md`.

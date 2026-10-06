@@ -25,6 +25,9 @@ public class MusicRecognitionOrchestrator : IDisposable
 
     private const int CycleIdle = 0;
     private const int CycleRunning = 1;
+    private const int NotPaused = 0;
+    private const int Paused = 1;
+    private const int DefaultIntervalSeconds = 30;
 
     private readonly IAudioCapture _audioCapture;
     private readonly ISongIdentifier _songId;
@@ -35,6 +38,8 @@ public class MusicRecognitionOrchestrator : IDisposable
     private int _consecutiveMisses;
     private bool _lyricsResolved;
     private int _cycleState = CycleIdle;
+    private int _pauseState = NotPaused;
+    private int _intervalSeconds = DefaultIntervalSeconds;
 
     public RecognitionState State { get; private set; } = RecognitionState.Idle;
     public SongInfo? CurrentSong => _currentSong;
@@ -58,13 +63,54 @@ public class MusicRecognitionOrchestrator : IDisposable
     /// <summary>
     /// Starts the recognition loop. Polls every <paramref name="intervalSeconds"/> seconds.
     /// </summary>
-    public void Start(int intervalSeconds = 30)
+    public void Start(int intervalSeconds = DefaultIntervalSeconds)
     {
         Stop();
+        _intervalSeconds = intervalSeconds;
+        StartLoop();
+    }
+
+    /// <summary>True between <see cref="Pause"/> and <see cref="Resume"/>/<see cref="Stop"/>/<see cref="Start"/>.</summary>
+    public bool IsPaused => Volatile.Read(ref _pauseState) == Paused;
+
+    /// <summary>
+    /// Stops listening (the microphone turns off) but keeps the song, lyrics and state on display, so
+    /// <see cref="Resume"/> can continue where it left off. Does nothing unless the loop is running.
+    /// An in-flight cycle is cancelled and emits nothing further.
+    /// </summary>
+    public void Pause()
+    {
+        if (StopLoop())
+            Volatile.Write(ref _pauseState, Paused);
+    }
+
+    /// <summary>Restarts a paused loop, with the first cycle immediately. Does nothing unless paused.</summary>
+    public void Resume()
+    {
+        if (Interlocked.CompareExchange(ref _pauseState, NotPaused, Paused) == Paused)
+            StartLoop();
+    }
+
+    /// <summary>
+    /// Stops the loop and forgets the current song. An in-flight cycle is cancelled and emits nothing further.
+    /// </summary>
+    public void Stop()
+    {
+        Volatile.Write(ref _pauseState, NotPaused);
+        StopLoop();
+        _currentSong = null;
+        CurrentLyrics = null;
+        _consecutiveMisses = 0;
+        _lyricsResolved = false;
+        SetState(RecognitionState.Idle);
+    }
+
+    private void StartLoop()
+    {
         var cts = new CancellationTokenSource();
         _cts = cts;
         var token = cts.Token;
-        var interval = TimeSpan.FromSeconds(intervalSeconds);
+        var interval = TimeSpan.FromSeconds(_intervalSeconds);
 
         // Not an async lambda: RecognizeOnceAsync never throws, so nothing can escape onto the thread pool.
         _pollTimer = new Timer(_ => _ = RecognizeOnceAsync(token), null, interval, interval);
@@ -73,19 +119,14 @@ public class MusicRecognitionOrchestrator : IDisposable
         _ = RecognizeOnceAsync(token);
     }
 
-    /// <summary>
-    /// Stops the loop and forgets the current song. An in-flight cycle is cancelled and emits nothing further.
-    /// </summary>
-    public void Stop()
+    /// <summary>Disposes the timer and cancels the loop's token. Returns whether a loop was running.</summary>
+    private bool StopLoop()
     {
         Interlocked.Exchange(ref _pollTimer, null)?.Dispose();
         // Cancel but do not dispose: an in-flight cycle still holds the token.
-        Interlocked.Exchange(ref _cts, null)?.Cancel();
-        _currentSong = null;
-        CurrentLyrics = null;
-        _consecutiveMisses = 0;
-        _lyricsResolved = false;
-        SetState(RecognitionState.Idle);
+        var cts = Interlocked.Exchange(ref _cts, null);
+        cts?.Cancel();
+        return cts != null;
     }
 
     /// <summary>

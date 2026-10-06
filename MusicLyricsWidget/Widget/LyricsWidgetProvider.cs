@@ -99,12 +99,15 @@ public class LyricsWidgetProvider : IWidgetProvider
             orchestrator = _orchestrator;
         }
 
+        // Show what was on the card when the panel closed (e.g. the last lyrics), then listen on if we were listening.
         PushState(widgetId, orchestrator?.State ?? RecognitionState.Idle, orchestrator);
+        orchestrator?.Resume();
     }
 
     public void Deactivate(string widgetId)
     {
-        GetOrchestrator()?.Stop();
+        // The panel closed: turn the microphone off (privacy) but keep the song and lyrics for when it reopens.
+        GetOrchestrator()?.Pause();
     }
 
     private void StartListening()
