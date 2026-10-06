@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using MusicLyricsWidget.Models;
 
 namespace MusicLyricsWidget.Services;
@@ -32,6 +33,8 @@ public class MusicRecognitionOrchestrator : IDisposable
     private readonly IAudioCapture _audioCapture;
     private readonly ISongIdentifier _songId;
     private readonly ILyricsProvider _lyrics;
+    private readonly TimeProvider _time;
+    private readonly LyricsClock _clock;
     private CancellationTokenSource? _cts;
     private Timer? _pollTimer;
     private SongInfo? _currentSong;
@@ -50,14 +53,24 @@ public class MusicRecognitionOrchestrator : IDisposable
     public event Action<SongInfo, LyricsResult>? SongRecognized;
     public event Action<string>? ErrorOccurred;
 
+    /// <summary>The synced line being sung (-1 before the first); null without synced lyrics or a known position.</summary>
+    public int? CurrentLineIndex => _clock.CurrentLineIndex;
+
+    /// <summary>Raised when the current synced line changes while lyrics are shown (from a timer or a re-sync).</summary>
+    public event Action? LinePositionChanged;
+
     public MusicRecognitionOrchestrator(
         IAudioCapture audioCapture,
         ISongIdentifier songId,
-        ILyricsProvider lyrics)
+        ILyricsProvider lyrics,
+        TimeProvider? timeProvider = null)
     {
         _audioCapture = audioCapture;
         _songId = songId;
         _lyrics = lyrics;
+        _time = timeProvider ?? TimeProvider.System;
+        _clock = new LyricsClock(_time);
+        _clock.LineChanged += OnLineChanged;
     }
 
     /// <summary>
@@ -80,6 +93,7 @@ public class MusicRecognitionOrchestrator : IDisposable
     /// </summary>
     public void Pause()
     {
+        _clock.Halt();
         if (StopLoop())
             Volatile.Write(ref _pauseState, Paused);
     }
@@ -87,8 +101,17 @@ public class MusicRecognitionOrchestrator : IDisposable
     /// <summary>Restarts a paused loop, with the first cycle immediately. Does nothing unless paused.</summary>
     public void Resume()
     {
-        if (Interlocked.CompareExchange(ref _pauseState, NotPaused, Paused) == Paused)
-            StartLoop();
+        if (Interlocked.CompareExchange(ref _pauseState, NotPaused, Paused) != Paused)
+            return;
+
+        if (State == RecognitionState.DisplayingLyrics)
+        {
+            // One catch-up event for the time spent paused, then the clock ticks again.
+            if (_clock.Refresh())
+                LinePositionChanged?.Invoke();
+            _clock.Run();
+        }
+        StartLoop();
     }
 
     /// <summary>
@@ -102,6 +125,7 @@ public class MusicRecognitionOrchestrator : IDisposable
         CurrentLyrics = null;
         _consecutiveMisses = 0;
         _lyricsResolved = false;
+        _clock.Reset();
         SetState(RecognitionState.Idle);
     }
 
@@ -150,6 +174,7 @@ public class MusicRecognitionOrchestrator : IDisposable
             if (!showingSong)
                 SetState(RecognitionState.Listening);
             var pcmData = await _audioCapture.CaptureAudioAsync(cancellationToken);
+            var captureEnd = _time.GetTimestamp();   // the song position from ACRCloud belongs to this instant
             cancellationToken.ThrowIfCancellationRequested();
             var wavData = _audioCapture.WrapInWav(pcmData);
 
@@ -162,7 +187,7 @@ public class MusicRecognitionOrchestrator : IDisposable
             if (song == null)
                 HandleNoMatch();
             else
-                await HandleMatchAsync(song, cancellationToken);
+                await HandleMatchAsync(song, captureEnd, cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -185,7 +210,7 @@ public class MusicRecognitionOrchestrator : IDisposable
         }
     }
 
-    private async Task HandleMatchAsync(SongInfo song, CancellationToken cancellationToken)
+    private async Task HandleMatchAsync(SongInfo song, long captureEnd, CancellationToken cancellationToken)
     {
         _consecutiveMisses = 0;
 
@@ -193,7 +218,18 @@ public class MusicRecognitionOrchestrator : IDisposable
         // unless an error moved the state. A lookup that failed or was aborted is retried on the next match.
         if (song.Equals(_currentSong) && _lyricsResolved)
         {
-            EnsureDisplayingLyrics();
+            // Move the anchor (fixes pauses, seeks and drift on the player) without a redraw of the state.
+            var lineChanged = TrackLyrics(song, captureEnd);
+            if (State == RecognitionState.DisplayingLyrics)
+            {
+                if (lineChanged)
+                    LinePositionChanged?.Invoke();
+                _clock.Run();
+            }
+            else
+            {
+                EnsureDisplayingLyrics();
+            }
             return;
         }
 
@@ -201,17 +237,29 @@ public class MusicRecognitionOrchestrator : IDisposable
         _currentSong = song;
         CurrentLyrics = null;
         _lyricsResolved = false;
+        _clock.Reset();
         SetState(RecognitionState.FetchingLyrics);
         var lyrics = await _lyrics.GetLyricsAsync(song, cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
 
         _lyricsResolved = true;
         CurrentLyrics = lyrics;
+        TrackLyrics(song, captureEnd);   // the first render already shows the right line
         SetState(RecognitionState.DisplayingLyrics);
         if (lyrics != null)
         {
             SongRecognized?.Invoke(song, lyrics);
         }
+    }
+
+    /// <summary>Anchors the clock to this match when the lyrics are synced and the position is known; returns whether the line changed.</summary>
+    private bool TrackLyrics(SongInfo song, long captureEnd)
+    {
+        if (CurrentLyrics is { HasSyncedLyrics: true } lyrics && song.PositionAtSampleEnd is { } position)
+            return _clock.Track(lyrics.SyncedLyrics, position, captureEnd, song.Duration);
+
+        _clock.Reset();
+        return false;
     }
 
     private void HandleNoMatch()
@@ -230,6 +278,7 @@ public class MusicRecognitionOrchestrator : IDisposable
         _currentSong = null;
         CurrentLyrics = null;
         _lyricsResolved = false;
+        _clock.Reset();
         SetState(RecognitionState.NoMatch);
     }
 
@@ -242,12 +291,57 @@ public class MusicRecognitionOrchestrator : IDisposable
     private void SetState(RecognitionState newState)
     {
         State = newState;
+        // Lines tick only while the lyrics card is up; any other state (error, no match, a new fetch) stops them.
+        if (newState == RecognitionState.DisplayingLyrics)
+        {
+            // A card restored after the clock was halted must show the line for now, not the one it stopped on.
+            // No event: the render for this state change is about to read the index.
+            _clock.Refresh();
+            _clock.Run();
+        }
+        else
+        {
+            _clock.Halt();
+        }
         StateChanged?.Invoke(newState);
+    }
+
+    private void OnLineChanged()
+    {
+        // A tick can arrive just after the clock was halted; it must not redraw a card that is no longer the lyrics.
+        if (State != RecognitionState.DisplayingLyrics)
+            return;
+
+        try
+        {
+            LinePositionChanged?.Invoke();
+        }
+        catch (Exception ex)
+        {
+            FailDisplay(ex);
+        }
+    }
+
+    /// <summary>A failing line render becomes the error card, like a failing cycle; it must never escape the timer.</summary>
+    private void FailDisplay(Exception ex)
+    {
+        ErrorMessage = ex.Message;
+        try
+        {
+            SetState(RecognitionState.Error);
+            ErrorOccurred?.Invoke(ex.Message);
+        }
+        catch (Exception renderFailure)
+        {
+            // The error card could not be drawn either; the timer thread must not throw, so only a trace is left.
+            Trace.TraceError($"Rendering the error card failed: {renderFailure}");
+        }
     }
 
     public void Dispose()
     {
         Stop();
+        _clock.Dispose();
         _audioCapture.Dispose();
     }
 }
