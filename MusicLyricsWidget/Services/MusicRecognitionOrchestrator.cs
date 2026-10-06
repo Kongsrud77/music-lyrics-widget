@@ -106,10 +106,12 @@ public class MusicRecognitionOrchestrator : IDisposable
 
         if (State == RecognitionState.DisplayingLyrics)
         {
-            // One catch-up event for the time spent paused, then the clock ticks again.
-            if (_clock.Refresh())
-                LinePositionChanged?.Invoke();
+            // One catch-up event for the time spent paused, then the clock ticks again. Run before the event: a
+            // failing render becomes the error card (whose Halt wins) and must not keep the loop from restarting.
+            var changed = _clock.Refresh();
             _clock.Run();
+            if (changed)
+                OnLineChanged();
         }
         StartLoop();
     }

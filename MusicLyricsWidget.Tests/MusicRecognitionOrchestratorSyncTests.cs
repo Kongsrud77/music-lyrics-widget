@@ -169,6 +169,44 @@ public class MusicRecognitionOrchestratorSyncTests
     }
 
     [Fact]
+    public async Task AFailingCatchUpRenderOnResume_BecomesAnErrorCard_AndTheLoopStillRestarts()
+    {
+        var errors = new List<string>();
+        var stateAtError = RecognitionState.Idle;
+        _orchestrator.ErrorOccurred += message =>
+        {
+            errors.Add(message);
+            stateAtError = _orchestrator.State;
+        };
+        _orchestrator.LinePositionChanged += () => throw new InvalidOperationException("UpdateWidget failed");
+        _identifier.Enqueue(Song(12));
+        _lyrics.Enqueue(Synced);
+        _orchestrator.Start(FarAwayIntervalSeconds);
+        await WaitForAsync(() => _orchestrator.State == RecognitionState.DisplayingLyrics);
+        var gate = new BlockingGate();
+        _capture.Gate = gate;
+
+        try
+        {
+            _orchestrator.Pause();
+            _time.Advance(S(10));                               // the line moves on while paused
+
+            var ex = Record.Exception(() => _orchestrator.Resume());
+            await gate.Entered.WaitAsync(GuardTimeout);         // the loop restarted despite the failing render
+
+            Assert.Null(ex);
+            Assert.False(_orchestrator.IsPaused);
+            Assert.Equal(new[] { "UpdateWidget failed" }, errors);
+            Assert.Equal(RecognitionState.Error, stateAtError);
+        }
+        finally
+        {
+            _orchestrator.Stop();
+            gate.Release();
+        }
+    }
+
+    [Fact]
     public async Task Stop_ForgetsTheLine()
     {
         await CycleAsync(Song(12), Synced);
