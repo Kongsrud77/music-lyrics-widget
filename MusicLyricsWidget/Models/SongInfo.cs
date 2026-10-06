@@ -7,6 +7,8 @@ public class SongInfo
     public string Album { get; set; } = string.Empty;
     public string? AcrId { get; set; }
     public TimeSpan? Duration { get; set; }
+    /// <summary>Song position when the identified sample ended (from ACRCloud's offsets); null when unknown.</summary>
+    public TimeSpan? PositionAtSampleEnd { get; set; }
 
     public override string ToString() => $"{Artist} - {Title}";
 

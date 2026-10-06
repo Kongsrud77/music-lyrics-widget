@@ -16,6 +16,11 @@ public class SongIdentificationService : ISongIdentifier
     private const int RequestTimeoutSeconds = 15;
     private const string UnknownErrorMessage = "unknown error";
 
+    // AudioCaptureService.WrapInWav writes the canonical 44-byte PCM header.
+    private const int WavHeaderSize = 44;
+    private const int WavByteRateOffset = 28;
+    private const int WavDataSizeOffset = 40;
+
     // One client for the whole process: HttpClient is meant to be shared (a new one per instance leaks sockets).
     // It is never mutated after creation: no BaseAddress and no default headers, every request carries an absolute URL.
     private static readonly HttpClient SharedHttpClient = new()
@@ -78,7 +83,7 @@ public class SongIdentificationService : ISongIdentifier
         if (!response.IsSuccessStatusCode)
             throw new AcrCloudException($"ACRCloud request failed: HTTP {(int)response.StatusCode} {response.ReasonPhrase}");
 
-        return ParseResponse(json);
+        return ParseResponse(json, WavDuration(audioData));
     }
 
     internal string BuildStringToSign(string timestamp)
@@ -100,7 +105,7 @@ public class SongIdentificationService : ISongIdentifier
     /// Maps an ACRCloud response to a song. Returns null when ACRCloud found no match or could not
     /// fingerprint the sample (silence); throws <see cref="AcrCloudException"/> for any other status, so a bad key or quota is not mistaken for silence.
     /// </summary>
-    internal static SongInfo? ParseResponse(string json)
+    internal static SongInfo? ParseResponse(string json, TimeSpan? sampleDuration = null)
     {
         var root = JObject.Parse(json);
         var status = root["status"];
@@ -136,6 +141,40 @@ public class SongIdentificationService : ISongIdentifier
         if (durationMs.HasValue)
             song.Duration = TimeSpan.FromMilliseconds(durationMs.Value);
 
+        song.PositionAtSampleEnd = PositionAtSampleEnd(music, sampleDuration, song.Duration);
+
         return song;
+    }
+
+    /// <summary>
+    /// Song position at the end of the sample: where the match ended in the song plus the part of the sample after
+    /// the match. Falls back to play_offset_ms when that cannot be computed; null without any offset. Clamped to the song.
+    /// </summary>
+    internal static TimeSpan? PositionAtSampleEnd(JToken music, TimeSpan? sampleDuration, TimeSpan? songDuration)
+    {
+        var dbEnd = music["db_end_time_offset_ms"]?.Value<long?>();
+        var sampleEnd = music["sample_end_time_offset_ms"]?.Value<long?>();
+        var playOffset = music["play_offset_ms"]?.Value<long?>();
+
+        TimeSpan? position = dbEnd != null && sampleEnd != null && sampleDuration != null
+            ? TimeSpan.FromMilliseconds(dbEnd.Value) + (sampleDuration.Value - TimeSpan.FromMilliseconds(sampleEnd.Value))
+            : playOffset != null ? TimeSpan.FromMilliseconds(playOffset.Value) : null;
+
+        if (position == null)
+            return null;
+        if (position < TimeSpan.Zero)
+            return TimeSpan.Zero;
+        return songDuration != null && position > songDuration ? songDuration : position;
+    }
+
+    /// <summary>Length of a canonical PCM WAV (as WrapInWav writes it); null when the data is not one.</summary>
+    internal static TimeSpan? WavDuration(byte[] wav)
+    {
+        if (wav.Length < WavHeaderSize)
+            return null;
+
+        var byteRate = BitConverter.ToInt32(wav, WavByteRateOffset);
+        var dataSize = BitConverter.ToInt32(wav, WavDataSizeOffset);
+        return byteRate > 0 ? TimeSpan.FromSeconds((double)dataSize / byteRate) : null;
     }
 }
