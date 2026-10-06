@@ -16,7 +16,8 @@ public class LyricsWidgetProvider : IWidgetProvider
     private readonly Action _onLastWidgetDeleted;
 
     // Guards _activeWidgetId and _orchestrator. Never held across WidgetManager (a cross-process COM call) or an
-    // orchestrator Start/Stop/Dispose (they raise StateChanged synchronously, which would re-enter the provider).
+    // orchestrator Start/Stop/Resume/Dispose (they raise StateChanged or LinePositionChanged synchronously, which would
+    // re-enter the provider).
     private readonly object _gate = new();
     private MusicRecognitionOrchestrator? _orchestrator;
     private string? _activeWidgetId;
@@ -99,9 +100,11 @@ public class LyricsWidgetProvider : IWidgetProvider
             orchestrator = _orchestrator;
         }
 
-        // Show what was on the card when the panel closed (e.g. the last lyrics), then listen on if we were listening.
-        PushState(widgetId, orchestrator?.State ?? RecognitionState.Idle, orchestrator);
+        // Listen on if we were listening, before the push: Resume brings the synced line up to date (and starts the
+        // loop ahead of its own catch-up render), so the push shows the line for now instead of the one from before
+        // the pause. Both calls stay outside _gate, as they reach the widget host.
         orchestrator?.Resume();
+        PushState(widgetId, orchestrator?.State ?? RecognitionState.Idle, orchestrator);
     }
 
     public void Deactivate(string widgetId)

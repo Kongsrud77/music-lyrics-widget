@@ -169,6 +169,64 @@ public class MusicRecognitionOrchestratorSyncTests
     }
 
     [Fact]
+    public async Task Resume_RestartsTheLoop_BeforeTheCatchUpRender()
+    {
+        var capturesAtEvent = new List<int>();
+        _orchestrator.LinePositionChanged += () => capturesAtEvent.Add(_capture.CaptureCalls);
+        _identifier.Enqueue(Song(12));
+        _lyrics.Enqueue(Synced);
+        _orchestrator.Start(FarAwayIntervalSeconds);
+        await WaitForAsync(() => _orchestrator.State == RecognitionState.DisplayingLyrics);
+        var gate = new BlockingGate();
+        _capture.Gate = gate;
+
+        try
+        {
+            _orchestrator.Pause();
+            _time.Advance(S(10));
+
+            _orchestrator.Resume();
+            await gate.Entered.WaitAsync(GuardTimeout);
+
+            // The render is a slow cross-process call; a Deactivate arriving meanwhile must find a running loop to
+            // pause. One capture from the first cycle, the second already started when the catch-up event fires.
+            Assert.Equal(new[] { 2 }, capturesAtEvent);
+        }
+        finally
+        {
+            _orchestrator.Stop();
+            gate.Release();
+        }
+    }
+
+    [Fact]
+    public async Task APauseDuringTheCatchUpRender_LeavesTheOrchestratorPaused()
+    {
+        _identifier.Enqueue(Song(12));
+        _lyrics.Enqueue(Synced);
+        _orchestrator.Start(FarAwayIntervalSeconds);
+        await WaitForAsync(() => _orchestrator.State == RecognitionState.DisplayingLyrics);
+        var gate = new BlockingGate();
+        _capture.Gate = gate;
+        _orchestrator.LinePositionChanged += () => _orchestrator.Pause();   // the panel closes mid-render
+
+        try
+        {
+            _orchestrator.Pause();
+            _time.Advance(S(10));
+
+            _orchestrator.Resume();
+
+            Assert.True(_orchestrator.IsPaused);   // the microphone must not keep running behind a closed panel
+        }
+        finally
+        {
+            _orchestrator.Stop();
+            gate.Release();
+        }
+    }
+
+    [Fact]
     public async Task AFailingCatchUpRenderOnResume_BecomesAnErrorCard_AndTheLoopStillRestarts()
     {
         var errors = new List<string>();

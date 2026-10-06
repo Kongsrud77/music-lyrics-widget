@@ -104,16 +104,20 @@ public class MusicRecognitionOrchestrator : IDisposable
         if (Interlocked.CompareExchange(ref _pauseState, NotPaused, Paused) != Paused)
             return;
 
+        var changed = false;
         if (State == RecognitionState.DisplayingLyrics)
         {
-            // One catch-up event for the time spent paused, then the clock ticks again. Run before the event: a
-            // failing render becomes the error card (whose Halt wins) and must not keep the loop from restarting.
-            var changed = _clock.Refresh();
+            // Bring the line up to date without an event and let the clock tick again.
+            changed = _clock.Refresh();
             _clock.Run();
-            if (changed)
-                OnLineChanged();
         }
+
+        // The loop is up before the catch-up render: that render is a slow cross-process call, and a Pause (the panel
+        // closing) arriving meanwhile must find a running loop to stop, else the microphone would run behind a closed
+        // panel. A failing render becomes the error card (whose Halt wins) and does not affect the loop either.
         StartLoop();
+        if (changed)
+            OnLineChanged();   // one catch-up event for the time spent paused, not one per missed line
     }
 
     /// <summary>
