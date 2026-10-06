@@ -34,6 +34,8 @@
     <Compile Include="..\MusicLyricsWidget\Widget\WidgetStateManager.cs" Link="App\Widget\%(Filename)%(Extension)" />
     <Compile Include="..\MusicLyricsWidget\Widget\WidgetProviderIds.cs" Link="App\Widget\%(Filename)%(Extension)" />
     <Compile Include="..\MusicLyricsWidget\Widget\LaunchArguments.cs" Link="App\Widget\%(Filename)%(Extension)" />
+    <Compile Include="..\MusicLyricsWidget\Widget\LyricsWindow.cs" Link="App\Widget\LyricsWindow.cs" />
+    <Compile Include="..\MusicLyricsWidget\Widget\LyricsWindowText.cs" Link="App\Widget\LyricsWindowText.cs" />
   </ItemGroup>
 
   <!-- WidgetStateManager reads the card templates from AppContext.BaseDirectory\Widget\WidgetTemplates. -->
