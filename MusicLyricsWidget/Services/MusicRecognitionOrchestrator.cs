@@ -264,8 +264,10 @@ public class MusicRecognitionOrchestrator : IDisposable
         if (CurrentLyrics is { HasSyncedLyrics: true } lyrics && song.PositionAtSampleEnd is { } position)
             return _clock.Track(lyrics.SyncedLyrics, position, captureEnd, song.Duration);
 
+        // A line that was on the card is gone from now on: report it so the card is redrawn without the frozen trio.
+        var hadLine = _clock.CurrentLineIndex != null;
         _clock.Reset();
-        return false;
+        return hadLine;
     }
 
     private void HandleNoMatch()

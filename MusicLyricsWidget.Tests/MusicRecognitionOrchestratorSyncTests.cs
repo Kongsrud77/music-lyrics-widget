@@ -95,6 +95,18 @@ public class MusicRecognitionOrchestratorSyncTests
     }
 
     [Fact]
+    public async Task SameSongAgainWithoutAPosition_DropsTheLine_AndRedrawsTheCard()
+    {
+        await CycleAsync(Song(12), Synced);
+        Assert.Equal(0, _orchestrator.CurrentLineIndex);
+
+        await CycleAsync(Song(null));
+
+        Assert.Equal(1, _lineEvents);                 // the card must stop showing a line that is no longer tracked
+        Assert.Null(_orchestrator.CurrentLineIndex);
+    }
+
+    [Fact]
     public async Task SameSongAgain_MovesTheAnchorSilently()
     {
         await CycleAsync(Song(12), Synced);
