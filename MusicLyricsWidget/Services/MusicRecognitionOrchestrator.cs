@@ -56,7 +56,11 @@ public class MusicRecognitionOrchestrator : IDisposable
     /// <summary>The synced line being sung (-1 before the first); null without synced lyrics or a known position.</summary>
     public int? CurrentLineIndex => _clock.CurrentLineIndex;
 
-    /// <summary>Raised when the current synced line changes while lyrics are shown (from a timer or a re-sync).</summary>
+    /// <summary>
+    /// Raised when the current synced line changes while lyrics are shown: from the clock's timer thread, from a
+    /// recognition cycle that re-syncs or drops the line, or synchronously from <see cref="Resume"/> (the catch-up
+    /// for the time spent paused).
+    /// </summary>
     public event Action? LinePositionChanged;
 
     public MusicRecognitionOrchestrator(
@@ -88,8 +92,10 @@ public class MusicRecognitionOrchestrator : IDisposable
 
     /// <summary>
     /// Stops listening (the microphone turns off) but keeps the song, lyrics and state on display, so
-    /// <see cref="Resume"/> can continue where it left off. Does nothing unless the loop is running.
-    /// An in-flight cycle is cancelled and emits nothing further.
+    /// <see cref="Resume"/> can continue where it left off. The line clock is always halted, so no line event
+    /// follows a pause; the loop is stopped and marked paused only when it is running, so a pause without a
+    /// running loop leaves nothing for <see cref="Resume"/> to restart. An in-flight cycle is cancelled and emits
+    /// nothing further.
     /// </summary>
     public void Pause()
     {
@@ -98,7 +104,11 @@ public class MusicRecognitionOrchestrator : IDisposable
             Volatile.Write(ref _pauseState, Paused);
     }
 
-    /// <summary>Restarts a paused loop, with the first cycle immediately. Does nothing unless paused.</summary>
+    /// <summary>
+    /// Restarts a paused loop, with the first cycle immediately. Does nothing unless paused. While lyrics are shown it
+    /// also brings the line up to date: the loop starts first, then one <see cref="LinePositionChanged"/> follows
+    /// synchronously when the line moved during the pause.
+    /// </summary>
     public void Resume()
     {
         if (Interlocked.CompareExchange(ref _pauseState, NotPaused, Paused) != Paused)
