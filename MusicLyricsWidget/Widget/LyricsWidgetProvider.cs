@@ -133,6 +133,8 @@ public class LyricsWidgetProvider : IWidgetProvider
 
         var orchestrator = new MusicRecognitionOrchestrator(audioCapture, songId, lyrics);
         orchestrator.StateChanged += state => OnStateChanged(orchestrator, state);
+        // A line change redraws through the same path, so the lock rule and the stale-orchestrator filter apply unchanged.
+        orchestrator.LinePositionChanged += () => OnStateChanged(orchestrator, orchestrator.State);
 
         MusicRecognitionOrchestrator? replaced;
         lock (_gate)
@@ -170,8 +172,9 @@ public class LyricsWidgetProvider : IWidgetProvider
     }
 
     /// <summary>
-    /// Renders <paramref name="state"/> with the song, lyrics and error of <paramref name="source"/>, the
-    /// orchestrator that raised it. An error is rendered here only: there is no separate error event handler.
+    /// Renders <paramref name="state"/> with the song, lyrics, current synced line and error of
+    /// <paramref name="source"/>, the orchestrator that raised it. An error is rendered here only: there is no
+    /// separate error event handler.
     /// </summary>
     private void PushState(string widgetId, RecognitionState state, MusicRecognitionOrchestrator? source)
     {
@@ -179,7 +182,8 @@ public class LyricsWidgetProvider : IWidgetProvider
             state,
             source?.CurrentSong,
             source?.CurrentLyrics,
-            source?.ErrorMessage);
+            source?.ErrorMessage,
+            source?.CurrentLineIndex);
 
         PushToWidget(widgetId, template, data);
     }
