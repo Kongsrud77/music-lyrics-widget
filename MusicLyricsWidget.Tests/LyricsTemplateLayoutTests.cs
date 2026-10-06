@@ -6,42 +6,52 @@ using Newtonsoft.Json.Linq;
 namespace MusicLyricsWidget.Tests;
 
 /// <summary>
-/// The Widgets Board drops an element that is taller than the space left in the card, together with everything
-/// after it: with "maxLines": 20 the lyrics, the source and the button all vanished and only title + artist showed.
-/// Budget (Microsoft widget design fundamentals: 16 px margins, 48 px attribution area, caption text 12/16 px):
-/// medium 300x304 leaves room for about 8 caption lines after title, artist and button, large 300x462 about 16.
+/// The Widgets Board drops an element taller than the space left in the card, together with everything after it
+/// (seen: maxLines 20 made lyrics, source and button vanish). Budget per spec, calibrated on a real medium card:
+/// medium ≈ 10 caption lines, large ≈ 17.
 /// </summary>
 public class LyricsTemplateLayoutTests
 {
-    private const string LyricsBinding = "${lyrics}";
-    private const int MaxMediumLyricsLines = 6;
-    private const int MaxLargeLyricsLines = 14;
+    private const string PlainBinding = "${plainLyrics}";
 
     private static JObject Template() => JObject.Parse(
         File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Widget", "WidgetTemplates", "LyricsTemplate.json")));
 
-    private static List<JObject> LyricsBlocks() =>
-        Template().Descendants().OfType<JObject>().Where(o => (string?)o["text"] == LyricsBinding).ToList();
+    private static JObject SizeContainer(string size) => Assert.Single(
+        Template()["body"]!.OfType<JObject>(),
+        b => (string?)b["type"] == "Container" && ((string?)b["$when"])?.Contains($"\"{size}\"") == true);
+
+    private static int MaxLines(JToken block) => (int?)block["maxLines"] ?? int.MaxValue;
 
     [Theory]
-    [InlineData("medium", MaxMediumLyricsLines)]
-    [InlineData("large", MaxLargeLyricsLines)]
-    public void EachWidgetSize_HasOneLyricsBlock_CappedToFitTheCard(string size, int maxLines)
+    [InlineData("medium", 9, 9)]
+    [InlineData("large", 15, 16)]
+    public void EachSize_FitsItsBudget(string size, int plainBudget, int syncedBudget)
     {
-        var block = Assert.Single(LyricsBlocks(), b => ((string?)b["$when"])?.Contains($"\"{size}\"") == true);
+        var blocks = SizeContainer(size)["items"]!.OfType<JObject>().ToList();
+        var plain = Assert.Single(blocks, b => (string?)b["text"] == PlainBinding);
+        var synced = blocks.Where(b => (string?)b["text"] != PlainBinding).ToList();
 
-        Assert.True((bool?)block["wrap"]);
-        Assert.InRange((int?)block["maxLines"] ?? int.MaxValue, 1, maxLines);
+        Assert.All(blocks, b => Assert.True((bool?)b["wrap"]));
+        Assert.InRange(MaxLines(plain), 1, plainBudget);
+        Assert.Equal(3, synced.Count);
+        Assert.InRange(synced.Sum(MaxLines), 3, syncedBudget);
     }
 
     [Fact]
-    public void EveryLyricsBlock_IsTiedToAWidgetSize_SoNoUncappedBlockRendersEverywhere()
+    public void EveryLyricsBlock_IsInsideASizeContainer_AndHiddenWhenEmpty()
     {
-        Assert.All(LyricsBlocks(), block => Assert.Contains("$host.widgetSize", (string?)block["$when"]));
+        var topLevelTexts = Template()["body"]!.OfType<JObject>()
+            .Where(b => (string?)b["type"] == "TextBlock")
+            .Select(b => (string?)b["text"]);
+        Assert.Equal(new[] { "${songTitle}", "${artist}", "Source: ${source}" }, topLevelTexts);
+
+        foreach (var size in new[] { "medium", "large" })
+            Assert.All(SizeContainer(size)["items"]!.OfType<JObject>(), b => Assert.Contains("!= ''", (string?)b["$when"]));
     }
 
     [Fact]
-    public void LyricsData_IsLimitedToWhatTheLargestCardShows()
+    public void PlainData_IsLimitedToWhatTheLargeCardShows()
     {
         var plain = string.Join("\n", Enumerable.Range(1, 40).Select(i => $"Line {i}"));
         var lyrics = new LyricsResult { PlainLyrics = plain, Source = "LRCLIB" };
@@ -49,7 +59,7 @@ public class LyricsTemplateLayoutTests
 
         var (_, data) = new WidgetStateManager().GetWidgetContent(RecognitionState.DisplayingLyrics, song, lyrics);
 
-        var sent = ((string?)JObject.Parse(data)["lyrics"])!.Split('\n');
-        Assert.Equal(Enumerable.Range(1, MaxLargeLyricsLines).Select(i => $"Line {i}"), sent);
+        var sent = ((string?)JObject.Parse(data)["plainLyrics"])!.Split('\n');
+        Assert.Equal(Enumerable.Range(1, 15).Select(i => $"Line {i}"), sent);
     }
 }

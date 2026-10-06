@@ -16,7 +16,20 @@ public class WidgetStateManagerTests
     private static readonly SongInfo TestSong = new() { Title = "Test Title", Artist = "Test Artist" };
     private static readonly LyricsResult TestLyrics = new() { PlainLyrics = "Line one\nLine two", Source = "LRCLIB" };
 
-    private sealed record Case(RecognitionState State, SongInfo? Song, LyricsResult? Lyrics, string? ErrorMessage);
+    private static readonly LyricsResult SyncedLyrics = new()
+    {
+        Source = "LRCLIB",
+        SyncedLyrics = Enumerable.Range(1, 5)
+            .Select(i => new LyricsLine { Timestamp = TimeSpan.FromSeconds(i * 5), Text = $"L{i}" })
+            .ToList(),
+    };
+
+    private sealed record Case(
+        RecognitionState State,
+        SongInfo? Song,
+        LyricsResult? Lyrics,
+        string? ErrorMessage,
+        int? CurrentLineIndex = null);
 
     private static readonly Dictionary<string, Case> Cases = new()
     {
@@ -27,6 +40,7 @@ public class WidgetStateManagerTests
         ["FetchingLyrics"] = new(RecognitionState.FetchingLyrics, TestSong, null, null),
         ["DisplayingLyrics with lyrics"] = new(RecognitionState.DisplayingLyrics, TestSong, TestLyrics, null),
         ["DisplayingLyrics without lyrics"] = new(RecognitionState.DisplayingLyrics, TestSong, null, null),
+        ["DisplayingLyrics synced"] = new(RecognitionState.DisplayingLyrics, TestSong, SyncedLyrics, null, 2),
         ["Error with message"] = new(RecognitionState.Error, null, null, "Boom"),
         ["Error without message"] = new(RecognitionState.Error, null, null, null),
     };
@@ -100,8 +114,12 @@ public class WidgetStateManagerTests
             data,
             ("songTitle", "Test Title"),
             ("artist", "Test Artist"),
-            ("lyrics", "Line one\nLine two"),
-            ("source", "LRCLIB"));
+            ("source", "LRCLIB"),
+            ("plainLyrics", "Line one\nLine two"),
+            ("previousLineMedium", ""),
+            ("previousLinesLarge", ""),
+            ("currentLine", ""),
+            ("nextLines", ""));
     }
 
     [Fact]
@@ -114,8 +132,30 @@ public class WidgetStateManagerTests
             data,
             ("songTitle", "Test Title"),
             ("artist", "Test Artist"),
-            ("lyrics", "No lyrics found for this song."),
-            ("source", ""));
+            ("source", ""),
+            ("plainLyrics", "No lyrics found for this song."),
+            ("previousLineMedium", ""),
+            ("previousLinesLarge", ""),
+            ("currentLine", ""),
+            ("nextLines", ""));
+    }
+
+    [Fact]
+    public void DisplayingLyrics_WithSyncedLyricsAndCurrentLine_ReturnsTheWindowAroundIt()
+    {
+        var (template, data) = GetContent(Cases["DisplayingLyrics synced"]);
+
+        Assert.Equal(ReadTemplate(LyricsTemplateFile), template);
+        AssertData(
+            data,
+            ("songTitle", "Test Title"),
+            ("artist", "Test Artist"),
+            ("source", "LRCLIB"),
+            ("plainLyrics", ""),
+            ("previousLineMedium", "L2"),
+            ("previousLinesLarge", "L1\nL2"),
+            ("currentLine", "L3"),
+            ("nextLines", "L4\nL5"));
     }
 
     [Fact]
@@ -153,7 +193,8 @@ public class WidgetStateManagerTests
     }
 
     private (string template, string data) GetContent(Case testCase) =>
-        _manager.GetWidgetContent(testCase.State, testCase.Song, testCase.Lyrics, testCase.ErrorMessage);
+        _manager.GetWidgetContent(
+            testCase.State, testCase.Song, testCase.Lyrics, testCase.ErrorMessage, testCase.CurrentLineIndex);
 
     private static string ReadTemplate(string fileName) =>
         File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Widget", "WidgetTemplates", fileName));

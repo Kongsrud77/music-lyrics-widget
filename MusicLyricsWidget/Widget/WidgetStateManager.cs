@@ -7,9 +7,10 @@ namespace MusicLyricsWidget.Widget;
 
 public class WidgetStateManager
 {
-    // The large card shows 14 lyrics lines (LyricsTemplate.json caps each size with maxLines, because the Widgets
-    // Board drops an element that does not fit, plus everything after it); sending more is wasted payload.
-    private const int MaxLyricsLines = 14;
+    // Plain lyrics sent: the large card shows 15 lines, the medium card's maxLines cuts it to 9. LyricsTemplate.json
+    // caps every block per size, because the Widgets Board drops an element that does not fit plus all after it.
+    private const int MaxPlainLyricsLines = 15;
+    private const string NoLyricsMessage = "No lyrics found for this song.";
 
     private readonly string _listeningTemplate;
     private readonly string _lyricsTemplate;
@@ -27,7 +28,8 @@ public class WidgetStateManager
         RecognitionState state,
         SongInfo? song = null,
         LyricsResult? lyrics = null,
-        string? errorMessage = null)
+        string? errorMessage = null,
+        int? currentLineIndex = null)
     {
         return state switch
         {
@@ -49,23 +51,11 @@ public class WidgetStateManager
 
             RecognitionState.DisplayingLyrics when song != null && lyrics != null => (
                 _lyricsTemplate,
-                CreateData(new
-                {
-                    songTitle = song.Title,
-                    artist = song.Artist,
-                    lyrics = FirstLines(lyrics.PlainLyrics, MaxLyricsLines),
-                    source = lyrics.Source
-                })),
+                LyricsData(song, lyrics, currentLineIndex)),
 
             RecognitionState.DisplayingLyrics when song != null => (
                 _lyricsTemplate,
-                CreateData(new
-                {
-                    songTitle = song.Title,
-                    artist = song.Artist,
-                    lyrics = "No lyrics found for this song.",
-                    source = ""
-                })),
+                LyricsData(song, null, null)),
 
             RecognitionState.Error => (
                 _errorTemplate,
@@ -75,6 +65,33 @@ public class WidgetStateManager
                 _listeningTemplate,
                 CreateData(new { statusText = "Ready — tap Listen Now to start" }))
         };
+    }
+
+    /// <summary>
+    /// Lyrics-card data. With synced lines and a known current line: the window around it; otherwise plain text from
+    /// the start (or the no-lyrics message). Every field is always present, so the template's $when tests are exact.
+    /// </summary>
+    private static string LyricsData(SongInfo song, LyricsResult? lyrics, int? currentLineIndex)
+    {
+        var window = lyrics is { HasSyncedLyrics: true } && currentLineIndex != null
+            ? LyricsWindow.For(lyrics.SyncedLyrics, currentLineIndex.Value)
+            : null;
+
+        var plain = window != null ? string.Empty
+            : lyrics == null ? NoLyricsMessage
+            : FirstLines(lyrics.PlainLyrics, MaxPlainLyricsLines);
+
+        return CreateData(new
+        {
+            songTitle = song.Title,
+            artist = song.Artist,
+            source = lyrics?.Source ?? string.Empty,
+            plainLyrics = plain,
+            previousLineMedium = window?.PreviousLineMedium ?? string.Empty,
+            previousLinesLarge = window?.PreviousLinesLarge ?? string.Empty,
+            currentLine = window?.CurrentLine ?? string.Empty,
+            nextLines = window?.NextLines ?? string.Empty,
+        });
     }
 
     private static string CreateData(object data) =>
